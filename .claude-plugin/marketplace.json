@@ -2,7 +2,7 @@
   "plugins": [
     {
       "name": "arm-reference-mcp",
-      "description": "ARM register quick-reference — lookup and browse registers for AArch32 and AArch64 architectures.",
+      "description": "ARM architecture reference — 17 tools covering registers, instructions, calling conventions, exception levels, security models, page tables, memory attributes, extensions, assembly patterns, barriers, and core/IP reference for AArch32 and AArch64.",
       "source": "."
     }
   ]
