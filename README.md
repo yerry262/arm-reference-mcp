@@ -96,21 +96,33 @@ The server exposes **17 tools** organized into five categories:
 
 You need Python 3.10+ and either [uv](https://docs.astral.sh/uv/) (recommended) or pip installed.
 
+This package is distributed via GitHub (not PyPI). All install methods below pull directly from the repository.
+
 ---
 
 ### a. Claude Code (CLI)
 
 **Route 1: Add as a standalone MCP server**
 
-Using `uvx` (no permanent install required):
+Using `uvx` to install directly from GitHub (no permanent install required):
 
 ```bash
-claude mcp add --transport stdio arm-reference -- uvx arm-reference-mcp
+claude mcp add --transport stdio arm-reference -- uvx --from "git+https://github.com/yerry262/arm-reference-mcp.git" arm-reference-mcp
+```
+
+Or, install with pip first, then add the server:
+
+```bash
+pip install "git+https://github.com/yerry262/arm-reference-mcp.git"
+claude mcp add --transport stdio arm-reference -- arm-reference-mcp
 ```
 
 Or, if you have cloned the repo locally and want to run from source:
 
 ```bash
+git clone https://github.com/yerry262/arm-reference-mcp.git
+cd arm-reference-mcp
+pip install -e .
 claude mcp add --transport stdio arm-reference -- python -m arm_reference_mcp.server
 ```
 
@@ -146,7 +158,7 @@ Create or edit `.vscode/mcp.json` in your workspace root:
     "arm-reference": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["arm-reference-mcp"]
+      "args": ["--from", "git+https://github.com/yerry262/arm-reference-mcp.git", "arm-reference-mcp"]
     }
   }
 }
@@ -161,7 +173,7 @@ Alternatively, add it to your VS Code user settings JSON (`settings.json`):
       "arm-reference": {
         "type": "stdio",
         "command": "uvx",
-        "args": ["arm-reference-mcp"]
+        "args": ["--from", "git+https://github.com/yerry262/arm-reference-mcp.git", "arm-reference-mcp"]
       }
     }
   }
@@ -181,7 +193,7 @@ Add to `.cursor/mcp.json` in your project root, or configure in Cursor's global 
   "mcpServers": {
     "arm-reference": {
       "command": "uvx",
-      "args": ["arm-reference-mcp"]
+      "args": ["--from", "git+https://github.com/yerry262/arm-reference-mcp.git", "arm-reference-mcp"]
     }
   }
 }
@@ -200,7 +212,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
   "mcpServers": {
     "arm-reference": {
       "command": "uvx",
-      "args": ["arm-reference-mcp"]
+      "args": ["--from", "git+https://github.com/yerry262/arm-reference-mcp.git", "arm-reference-mcp"]
     }
   }
 }
@@ -220,7 +232,7 @@ Codex CLI supports MCP servers via its configuration. Add the server to your Cod
     "arm-reference": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["arm-reference-mcp"]
+      "args": ["--from", "git+https://github.com/yerry262/arm-reference-mcp.git", "arm-reference-mcp"]
     }
   }
 }
@@ -235,18 +247,22 @@ Refer to the [Codex CLI documentation](https://github.com/openai/codex) for the 
 Any MCP-compatible client can connect to this server over **stdio** transport. The command to launch the server is:
 
 ```bash
-uvx arm-reference-mcp
+uvx --from "git+https://github.com/yerry262/arm-reference-mcp.git" arm-reference-mcp
 ```
 
-Or, if installed via pip:
+Or, install with pip and run directly:
 
 ```bash
+pip install "git+https://github.com/yerry262/arm-reference-mcp.git"
 arm-reference-mcp
 ```
 
-Or, run directly from a cloned checkout:
+Or, run from a cloned checkout:
 
 ```bash
+git clone https://github.com/yerry262/arm-reference-mcp.git
+cd arm-reference-mcp
+pip install -e .
 python -m arm_reference_mcp.server
 ```
 

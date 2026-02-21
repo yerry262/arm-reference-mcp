@@ -3,7 +3,7 @@
     "arm-reference": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["arm-reference-mcp"]
+      "args": ["--from", "git+https://github.com/yerry262/arm-reference-mcp.git", "arm-reference-mcp"]
     }
   }
 }
