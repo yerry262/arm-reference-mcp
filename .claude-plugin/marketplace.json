@@ -1,9 +1,13 @@
 {
+  "name": "arm-reference",
+  "owner": {
+    "name": "yerry262"
+  },
   "plugins": [
     {
       "name": "arm-reference-mcp",
-      "description": "ARM architecture reference — 17 tools covering registers, instructions, calling conventions, exception levels, security models, page tables, memory attributes, extensions, assembly patterns, barriers, and core/IP reference for AArch32 and AArch64.",
-      "source": "."
+      "description": "ARM architecture reference -- 23 tools covering registers, instructions, calling conventions, exception levels, security models, page tables, memory attributes, extensions, assembly patterns, barriers, core/IP reference, NEON intrinsics, SME tiles, optimization, system registers, PMU events, and x86-to-ARM translation for AArch32 and AArch64.",
+      "source": "./"
     }
   ]
 }
