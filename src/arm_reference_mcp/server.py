@@ -1,6 +1,6 @@
 """ARM Register Reference MCP Server.
 
-Provides thirteen tools:
+Provides twenty-three tools:
   - lookup_register:               Get detailed info on a specific ARM register.
   - list_registers:                Browse registers by architecture and category.
   - decode_instruction:            Decode a 32-bit hex value into AArch32 instruction fields.
@@ -14,6 +14,16 @@ Provides thirteen tools:
   - compare_cores:                 Side-by-side comparison of two ARM cores.
   - explain_extension:             ARM architecture extension reference (SVE, MTE, PAC, etc.).
   - compare_architecture_versions: ARM architecture version features and comparison.
+  - explain_page_table_format:     AArch64 page table translation schemes.
+  - explain_memory_attributes:     Memory attributes (cacheability, shareability, permissions).
+  - show_assembly_pattern:         Annotated ARM assembly for common patterns.
+  - explain_barrier:               Memory barriers and synchronization instructions.
+  - explain_neon_intrinsic:        NEON/ASIMD intrinsic reference (instruction, types, latency).
+  - explain_sme_tile:              SME tile operations, ZA storage, streaming SVE mode.
+  - suggest_optimization:          ARM-specific optimization suggestions for code patterns.
+  - lookup_system_register:        Full AArch64 system register reference.
+  - explain_performance_counter:   ARM PMU performance counter event reference.
+  - translate_intrinsic:           Translate between x86 SSE/AVX and ARM NEON/SVE intrinsics.
 """
 
 from mcp.server.fastmcp import FastMCP
@@ -6449,6 +6459,5841 @@ def explain_barrier(barrier_type: str) -> str:
 
     return _format_barrier(key, _BARRIER_DATA[key])
 
+
+# ---- NEON / Advanced SIMD Intrinsic Data ----
+
+_NEON_INTRINSICS: dict[str, dict] = {
+    # --- Arithmetic (float) ---
+    "vaddq_f32": {
+        "signature": "float32x4_t vaddq_f32(float32x4_t a, float32x4_t b)",
+        "instruction": "FADD Vd.4S, Vn.4S, Vm.4S",
+        "description": "Add two 128-bit vectors of four 32-bit floats element-wise.",
+        "data_types": ["float32x4_t"],
+        "category": "Arithmetic",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-4 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t a = vld1q_f32(ptr_a);\n'
+            'float32x4_t b = vld1q_f32(ptr_b);\n'
+            'float32x4_t sum = vaddq_f32(a, b);\n'
+            'vst1q_f32(out, sum);'
+        ),
+    },
+    "vsubq_f32": {
+        "signature": "float32x4_t vsubq_f32(float32x4_t a, float32x4_t b)",
+        "instruction": "FSUB Vd.4S, Vn.4S, Vm.4S",
+        "description": "Subtract two 128-bit vectors of four 32-bit floats element-wise (a - b).",
+        "data_types": ["float32x4_t"],
+        "category": "Arithmetic",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-4 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t a = vld1q_f32(ptr_a);\n'
+            'float32x4_t b = vld1q_f32(ptr_b);\n'
+            'float32x4_t diff = vsubq_f32(a, b);\n'
+            'vst1q_f32(out, diff);'
+        ),
+    },
+    "vmulq_f32": {
+        "signature": "float32x4_t vmulq_f32(float32x4_t a, float32x4_t b)",
+        "instruction": "FMUL Vd.4S, Vn.4S, Vm.4S",
+        "description": "Multiply two 128-bit vectors of four 32-bit floats element-wise.",
+        "data_types": ["float32x4_t"],
+        "category": "Arithmetic",
+        "architecture": "AArch32/AArch64",
+        "latency": "3-5 cycles (Cortex-A78 class)",
+        "throughput": "1-2 per cycle",
+        "example": (
+            'float32x4_t a = vld1q_f32(ptr_a);\n'
+            'float32x4_t b = vld1q_f32(ptr_b);\n'
+            'float32x4_t prod = vmulq_f32(a, b);\n'
+            'vst1q_f32(out, prod);'
+        ),
+    },
+    "vmlaq_f32": {
+        "signature": "float32x4_t vmlaq_f32(float32x4_t a, float32x4_t b, float32x4_t c)",
+        "instruction": "FMLA Vd.4S, Vn.4S, Vm.4S",
+        "description": (
+            "Fused multiply-accumulate: a + b * c. Computes the product of b and c, "
+            "adds a, and returns the result with a single rounding step."
+        ),
+        "data_types": ["float32x4_t"],
+        "category": "Arithmetic",
+        "architecture": "AArch32/AArch64",
+        "latency": "4-6 cycles (Cortex-A78 class)",
+        "throughput": "1-2 per cycle",
+        "example": (
+            'float32x4_t acc = vld1q_f32(ptr_acc);\n'
+            'float32x4_t b = vld1q_f32(ptr_b);\n'
+            'float32x4_t c = vld1q_f32(ptr_c);\n'
+            'acc = vmlaq_f32(acc, b, c);  // acc += b * c\n'
+            'vst1q_f32(out, acc);'
+        ),
+    },
+    "vfmaq_f32": {
+        "signature": "float32x4_t vfmaq_f32(float32x4_t a, float32x4_t b, float32x4_t c)",
+        "instruction": "FMLA Vd.4S, Vn.4S, Vm.4S",
+        "description": (
+            "Fused multiply-accumulate: a + b * c. This is the preferred FMA intrinsic "
+            "on AArch64 (ARMv8.0+). Unlike vmlaq_f32, this intrinsic is guaranteed to "
+            "emit a true fused multiply-add instruction with a single rounding step, "
+            "providing both better accuracy and better performance. Critical for AI/ML "
+            "inference kernels, GEMM, and convolution inner loops."
+        ),
+        "data_types": ["float32x4_t"],
+        "category": "Arithmetic",
+        "architecture": "AArch64",
+        "latency": "4 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            '// Dot-product accumulation pattern\n'
+            'float32x4_t acc = vdupq_n_f32(0.0f);\n'
+            'for (int i = 0; i < N; i += 4) {\n'
+            '    float32x4_t a = vld1q_f32(&src_a[i]);\n'
+            '    float32x4_t b = vld1q_f32(&src_b[i]);\n'
+            '    acc = vfmaq_f32(acc, a, b);  // acc += a * b\n'
+            '}\n'
+            'float32_t result = vaddvq_f32(acc);  // horizontal sum'
+        ),
+    },
+    "vfmsq_f32": {
+        "signature": "float32x4_t vfmsq_f32(float32x4_t a, float32x4_t b, float32x4_t c)",
+        "instruction": "FMLS Vd.4S, Vn.4S, Vm.4S",
+        "description": (
+            "Fused multiply-subtract: a - b * c. Computes the product of b and c, "
+            "subtracts from a, with a single rounding step. Useful for residual "
+            "computations and iterative refinement."
+        ),
+        "data_types": ["float32x4_t"],
+        "category": "Arithmetic",
+        "architecture": "AArch64",
+        "latency": "4 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t acc = vld1q_f32(ptr_acc);\n'
+            'float32x4_t b = vld1q_f32(ptr_b);\n'
+            'float32x4_t c = vld1q_f32(ptr_c);\n'
+            'acc = vfmsq_f32(acc, b, c);  // acc -= b * c'
+        ),
+    },
+    "vfmaq_laneq_f32": {
+        "signature": "float32x4_t vfmaq_laneq_f32(float32x4_t a, float32x4_t b, float32x4_t v, const int lane)",
+        "instruction": "FMLA Vd.4S, Vn.4S, Vm.S[lane]",
+        "description": (
+            "Fused multiply-accumulate by lane: a + b * v[lane]. Multiplies each element "
+            "of b by a single element (lane) of v, and adds to a. Essential for GEMM "
+            "kernels where one operand is broadcast from a specific element."
+        ),
+        "data_types": ["float32x4_t"],
+        "category": "Arithmetic",
+        "architecture": "AArch64",
+        "latency": "4 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            '// Matrix multiply inner loop: C[row] += A[row] * B[k][col]\n'
+            'float32x4_t b_row = vld1q_f32(&B[k*N + j]);\n'
+            'c0 = vfmaq_laneq_f32(c0, b_row, a_col, 0);\n'
+            'c1 = vfmaq_laneq_f32(c1, b_row, a_col, 1);\n'
+            'c2 = vfmaq_laneq_f32(c2, b_row, a_col, 2);\n'
+            'c3 = vfmaq_laneq_f32(c3, b_row, a_col, 3);'
+        ),
+    },
+    "vabdq_f32": {
+        "signature": "float32x4_t vabdq_f32(float32x4_t a, float32x4_t b)",
+        "instruction": "FABD Vd.4S, Vn.4S, Vm.4S",
+        "description": "Compute the absolute difference |a - b| for each element of two float32 vectors.",
+        "data_types": ["float32x4_t"],
+        "category": "Arithmetic",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-4 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t a = vld1q_f32(ptr_a);\n'
+            'float32x4_t b = vld1q_f32(ptr_b);\n'
+            'float32x4_t diff = vabdq_f32(a, b);  // |a - b|\n'
+            'vst1q_f32(out, diff);'
+        ),
+    },
+    "vnegq_f32": {
+        "signature": "float32x4_t vnegq_f32(float32x4_t a)",
+        "instruction": "FNEG Vd.4S, Vn.4S",
+        "description": "Negate each element of a 128-bit vector of four 32-bit floats.",
+        "data_types": ["float32x4_t"],
+        "category": "Arithmetic",
+        "architecture": "AArch32/AArch64",
+        "latency": "2 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t a = vld1q_f32(ptr_a);\n'
+            'float32x4_t neg = vnegq_f32(a);  // -a\n'
+            'vst1q_f32(out, neg);'
+        ),
+    },
+    "vabsq_f32": {
+        "signature": "float32x4_t vabsq_f32(float32x4_t a)",
+        "instruction": "FABS Vd.4S, Vn.4S",
+        "description": "Compute the absolute value of each element of a 128-bit vector of four 32-bit floats.",
+        "data_types": ["float32x4_t"],
+        "category": "Arithmetic",
+        "architecture": "AArch32/AArch64",
+        "latency": "2 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t a = vld1q_f32(ptr_a);\n'
+            'float32x4_t abs_a = vabsq_f32(a);  // |a|\n'
+            'vst1q_f32(out, abs_a);'
+        ),
+    },
+    # --- Integer Arithmetic ---
+    "vaddq_s32": {
+        "signature": "int32x4_t vaddq_s32(int32x4_t a, int32x4_t b)",
+        "instruction": "ADD Vd.4S, Vn.4S, Vm.4S",
+        "description": "Add two 128-bit vectors of four signed 32-bit integers element-wise.",
+        "data_types": ["int32x4_t"],
+        "category": "Integer Arithmetic",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'int32x4_t a = vld1q_s32(ptr_a);\n'
+            'int32x4_t b = vld1q_s32(ptr_b);\n'
+            'int32x4_t sum = vaddq_s32(a, b);\n'
+            'vst1q_s32(out, sum);'
+        ),
+    },
+    "vmulq_s32": {
+        "signature": "int32x4_t vmulq_s32(int32x4_t a, int32x4_t b)",
+        "instruction": "MUL Vd.4S, Vn.4S, Vm.4S",
+        "description": "Multiply two 128-bit vectors of four signed 32-bit integers element-wise (low 32 bits of result).",
+        "data_types": ["int32x4_t"],
+        "category": "Integer Arithmetic",
+        "architecture": "AArch32/AArch64",
+        "latency": "3-5 cycles (Cortex-A78 class)",
+        "throughput": "1 per cycle",
+        "example": (
+            'int32x4_t a = vld1q_s32(ptr_a);\n'
+            'int32x4_t b = vld1q_s32(ptr_b);\n'
+            'int32x4_t prod = vmulq_s32(a, b);\n'
+            'vst1q_s32(out, prod);'
+        ),
+    },
+    "vqaddq_s16": {
+        "signature": "int16x8_t vqaddq_s16(int16x8_t a, int16x8_t b)",
+        "instruction": "SQADD Vd.8H, Vn.8H, Vm.8H",
+        "description": (
+            "Saturating add of two 128-bit vectors of eight signed 16-bit integers. "
+            "Results are clamped to [INT16_MIN, INT16_MAX] instead of wrapping on overflow."
+        ),
+        "data_types": ["int16x8_t"],
+        "category": "Integer Arithmetic",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'int16x8_t a = vld1q_s16(ptr_a);\n'
+            'int16x8_t b = vld1q_s16(ptr_b);\n'
+            'int16x8_t sum = vqaddq_s16(a, b);  // saturating add\n'
+            'vst1q_s16(out, sum);'
+        ),
+    },
+    "vqdmulhq_s16": {
+        "signature": "int16x8_t vqdmulhq_s16(int16x8_t a, int16x8_t b)",
+        "instruction": "SQDMULH Vd.8H, Vn.8H, Vm.8H",
+        "description": (
+            "Signed saturating doubling multiply returning high half. Multiplies each "
+            "element pair, doubles the result, and returns the high 16 bits with saturation. "
+            "Useful for fixed-point arithmetic."
+        ),
+        "data_types": ["int16x8_t"],
+        "category": "Integer Arithmetic",
+        "architecture": "AArch32/AArch64",
+        "latency": "3-5 cycles (Cortex-A78 class)",
+        "throughput": "1 per cycle",
+        "example": (
+            'int16x8_t a = vld1q_s16(ptr_a);\n'
+            'int16x8_t b = vld1q_s16(ptr_b);\n'
+            'int16x8_t result = vqdmulhq_s16(a, b);  // high half of 2*a*b\n'
+            'vst1q_s16(out, result);'
+        ),
+    },
+    # --- Load/Store ---
+    "vld1q_f32": {
+        "signature": "float32x4_t vld1q_f32(float32_t const *ptr)",
+        "instruction": "LD1 {Vt.4S}, [Xn]",
+        "description": (
+            "Load four contiguous 32-bit floats from memory into a 128-bit NEON register. "
+            "This is the most common NEON load intrinsic."
+        ),
+        "data_types": ["float32x4_t", "float32_t"],
+        "category": "Load/Store",
+        "architecture": "AArch32/AArch64",
+        "latency": "4-5 cycles (L1 hit, Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float data[4] = {1.0f, 2.0f, 3.0f, 4.0f};\n'
+            'float32x4_t v = vld1q_f32(data);'
+        ),
+    },
+    "vst1q_f32": {
+        "signature": "void vst1q_f32(float32_t *ptr, float32x4_t val)",
+        "instruction": "ST1 {Vt.4S}, [Xn]",
+        "description": "Store a 128-bit vector of four 32-bit floats to four contiguous memory locations.",
+        "data_types": ["float32x4_t", "float32_t"],
+        "category": "Load/Store",
+        "architecture": "AArch32/AArch64",
+        "latency": "4-5 cycles (Cortex-A78 class)",
+        "throughput": "1-2 per cycle",
+        "example": (
+            'float out[4];\n'
+            'float32x4_t v = vmulq_f32(a, b);\n'
+            'vst1q_f32(out, v);'
+        ),
+    },
+    "vld1q_u8": {
+        "signature": "uint8x16_t vld1q_u8(uint8_t const *ptr)",
+        "instruction": "LD1 {Vt.16B}, [Xn]",
+        "description": "Load sixteen contiguous unsigned 8-bit integers from memory into a 128-bit NEON register.",
+        "data_types": ["uint8x16_t", "uint8_t"],
+        "category": "Load/Store",
+        "architecture": "AArch32/AArch64",
+        "latency": "4-5 cycles (L1 hit, Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'uint8_t pixels[16];\n'
+            'uint8x16_t v = vld1q_u8(pixels);'
+        ),
+    },
+    "vld2q_f32": {
+        "signature": "float32x4x2_t vld2q_f32(float32_t const *ptr)",
+        "instruction": "LD2 {Vt.4S, Vt2.4S}, [Xn]",
+        "description": (
+            "Interleaved load: load eight consecutive floats from memory and de-interleave "
+            "into two registers. Element 0,2,4,6 go to the first register; 1,3,5,7 go to "
+            "the second. Useful for loading interleaved x/y coordinate pairs."
+        ),
+        "data_types": ["float32x4x2_t", "float32_t"],
+        "category": "Load/Store",
+        "architecture": "AArch32/AArch64",
+        "latency": "6-8 cycles (L1 hit, Cortex-A78 class)",
+        "throughput": "1 per cycle",
+        "example": (
+            '// Data: x0,y0, x1,y1, x2,y2, x3,y3\n'
+            'float32x4x2_t xy = vld2q_f32(interleaved_ptr);\n'
+            'float32x4_t x = xy.val[0];  // x0,x1,x2,x3\n'
+            'float32x4_t y = xy.val[1];  // y0,y1,y2,y3'
+        ),
+    },
+    "vld1q_dup_f32": {
+        "signature": "float32x4_t vld1q_dup_f32(float32_t const *ptr)",
+        "instruction": "LD1R {Vt.4S}, [Xn]",
+        "description": (
+            "Broadcast load: load a single 32-bit float from memory and replicate it "
+            "into all four lanes of a 128-bit vector."
+        ),
+        "data_types": ["float32x4_t", "float32_t"],
+        "category": "Load/Store",
+        "architecture": "AArch32/AArch64",
+        "latency": "4-5 cycles (L1 hit, Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float scale = 2.5f;\n'
+            'float32x4_t v_scale = vld1q_dup_f32(&scale);  // {2.5, 2.5, 2.5, 2.5}\n'
+            'float32x4_t result = vmulq_f32(data, v_scale);'
+        ),
+    },
+    # --- Conversion ---
+    "vcvtq_f32_s32": {
+        "signature": "float32x4_t vcvtq_f32_s32(int32x4_t a)",
+        "instruction": "SCVTF Vd.4S, Vn.4S",
+        "description": "Convert a vector of four signed 32-bit integers to four 32-bit floats.",
+        "data_types": ["float32x4_t", "int32x4_t"],
+        "category": "Conversion",
+        "architecture": "AArch32/AArch64",
+        "latency": "3-4 cycles (Cortex-A78 class)",
+        "throughput": "1-2 per cycle",
+        "example": (
+            'int32x4_t ints = vld1q_s32(int_data);\n'
+            'float32x4_t floats = vcvtq_f32_s32(ints);\n'
+            'vst1q_f32(float_out, floats);'
+        ),
+    },
+    "vcvtq_s32_f32": {
+        "signature": "int32x4_t vcvtq_s32_f32(float32x4_t a)",
+        "instruction": "FCVTZS Vd.4S, Vn.4S",
+        "description": "Convert a vector of four 32-bit floats to four signed 32-bit integers (round toward zero).",
+        "data_types": ["int32x4_t", "float32x4_t"],
+        "category": "Conversion",
+        "architecture": "AArch32/AArch64",
+        "latency": "3-4 cycles (Cortex-A78 class)",
+        "throughput": "1-2 per cycle",
+        "example": (
+            'float32x4_t floats = vld1q_f32(float_data);\n'
+            'int32x4_t ints = vcvtq_s32_f32(floats);\n'
+            'vst1q_s32(int_out, ints);'
+        ),
+    },
+    "vcvtq_f16_f32": {
+        "signature": "float16x4_t vcvtq_f16_f32(float32x4_t a)",
+        "instruction": "FCVTN Vd.4H, Vn.4S",
+        "description": (
+            "Narrow conversion: convert four 32-bit floats to four 16-bit floats (half precision). "
+            "Useful for reducing memory bandwidth in ML inference."
+        ),
+        "data_types": ["float16x4_t", "float32x4_t"],
+        "category": "Conversion",
+        "architecture": "AArch32/AArch64",
+        "latency": "3-4 cycles (Cortex-A78 class)",
+        "throughput": "1-2 per cycle",
+        "example": (
+            'float32x4_t f32 = vld1q_f32(data);\n'
+            'float16x4_t f16 = vcvtq_f16_f32(f32);\n'
+            'vst1_f16(out, f16);'
+        ),
+    },
+    "vmovl_s16": {
+        "signature": "int32x4_t vmovl_s16(int16x4_t a)",
+        "instruction": "SSHLL Vd.4S, Vn.4H, #0  (alias: SXTL)",
+        "description": (
+            "Widen (sign-extend): convert four signed 16-bit integers in the lower 64 bits "
+            "to four signed 32-bit integers. Equivalent to SXTL (sign-extend long)."
+        ),
+        "data_types": ["int32x4_t", "int16x4_t"],
+        "category": "Conversion",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'int16x4_t narrow = vld1_s16(data);  // 4 x int16\n'
+            'int32x4_t wide = vmovl_s16(narrow);  // 4 x int32'
+        ),
+    },
+    # --- Comparison ---
+    "vceqq_f32": {
+        "signature": "uint32x4_t vceqq_f32(float32x4_t a, float32x4_t b)",
+        "instruction": "FCMEQ Vd.4S, Vn.4S, Vm.4S",
+        "description": (
+            "Compare equal: for each lane, set all bits to 1 (0xFFFFFFFF) if a == b, "
+            "else all bits to 0. Result is a mask suitable for bitwise select."
+        ),
+        "data_types": ["uint32x4_t", "float32x4_t"],
+        "category": "Comparison",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t a = vld1q_f32(ptr_a);\n'
+            'float32x4_t b = vld1q_f32(ptr_b);\n'
+            'uint32x4_t mask = vceqq_f32(a, b);  // lane-wise a == b\n'
+            '// Use with vbslq to select elements'
+        ),
+    },
+    "vcgtq_f32": {
+        "signature": "uint32x4_t vcgtq_f32(float32x4_t a, float32x4_t b)",
+        "instruction": "FCMGT Vd.4S, Vn.4S, Vm.4S",
+        "description": (
+            "Compare greater-than: for each lane, set all bits to 1 if a > b, else 0."
+        ),
+        "data_types": ["uint32x4_t", "float32x4_t"],
+        "category": "Comparison",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t a = vld1q_f32(ptr_a);\n'
+            'float32x4_t b = vld1q_f32(ptr_b);\n'
+            'uint32x4_t mask = vcgtq_f32(a, b);  // lane-wise a > b'
+        ),
+    },
+    "vcltq_s32": {
+        "signature": "uint32x4_t vcltq_s32(int32x4_t a, int32x4_t b)",
+        "instruction": "CMGT Vd.4S, Vm.4S, Vn.4S  (reversed operands)",
+        "description": (
+            "Compare less-than for signed 32-bit integers: for each lane, set all bits to 1 "
+            "if a < b, else 0. Implemented by reversing operands of CMGT."
+        ),
+        "data_types": ["uint32x4_t", "int32x4_t"],
+        "category": "Comparison",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'int32x4_t a = vld1q_s32(ptr_a);\n'
+            'int32x4_t b = vld1q_s32(ptr_b);\n'
+            'uint32x4_t mask = vcltq_s32(a, b);  // lane-wise a < b'
+        ),
+    },
+    "vmaxq_f32": {
+        "signature": "float32x4_t vmaxq_f32(float32x4_t a, float32x4_t b)",
+        "instruction": "FMAX Vd.4S, Vn.4S, Vm.4S",
+        "description": "Element-wise maximum of two float32 vectors. Returns the larger value in each lane.",
+        "data_types": ["float32x4_t"],
+        "category": "Comparison",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t a = vld1q_f32(ptr_a);\n'
+            'float32x4_t b = vld1q_f32(ptr_b);\n'
+            'float32x4_t m = vmaxq_f32(a, b);  // max(a, b) per lane'
+        ),
+    },
+    "vminq_f32": {
+        "signature": "float32x4_t vminq_f32(float32x4_t a, float32x4_t b)",
+        "instruction": "FMIN Vd.4S, Vn.4S, Vm.4S",
+        "description": "Element-wise minimum of two float32 vectors. Returns the smaller value in each lane.",
+        "data_types": ["float32x4_t"],
+        "category": "Comparison",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t a = vld1q_f32(ptr_a);\n'
+            'float32x4_t b = vld1q_f32(ptr_b);\n'
+            'float32x4_t m = vminq_f32(a, b);  // min(a, b) per lane'
+        ),
+    },
+    # --- Bitwise ---
+    "vandq_u32": {
+        "signature": "uint32x4_t vandq_u32(uint32x4_t a, uint32x4_t b)",
+        "instruction": "AND Vd.16B, Vn.16B, Vm.16B",
+        "description": "Bitwise AND of two 128-bit vectors.",
+        "data_types": ["uint32x4_t"],
+        "category": "Bitwise",
+        "architecture": "AArch32/AArch64",
+        "latency": "1-2 cycles (Cortex-A78 class)",
+        "throughput": "2-4 per cycle",
+        "example": (
+            'uint32x4_t a = vld1q_u32(ptr_a);\n'
+            'uint32x4_t mask = vdupq_n_u32(0x7FFFFFFF);\n'
+            'uint32x4_t result = vandq_u32(a, mask);  // clear sign bit'
+        ),
+    },
+    "vorrq_u32": {
+        "signature": "uint32x4_t vorrq_u32(uint32x4_t a, uint32x4_t b)",
+        "instruction": "ORR Vd.16B, Vn.16B, Vm.16B",
+        "description": "Bitwise OR of two 128-bit vectors.",
+        "data_types": ["uint32x4_t"],
+        "category": "Bitwise",
+        "architecture": "AArch32/AArch64",
+        "latency": "1-2 cycles (Cortex-A78 class)",
+        "throughput": "2-4 per cycle",
+        "example": (
+            'uint32x4_t a = vld1q_u32(ptr_a);\n'
+            'uint32x4_t b = vld1q_u32(ptr_b);\n'
+            'uint32x4_t result = vorrq_u32(a, b);  // a | b'
+        ),
+    },
+    "veorq_u32": {
+        "signature": "uint32x4_t veorq_u32(uint32x4_t a, uint32x4_t b)",
+        "instruction": "EOR Vd.16B, Vn.16B, Vm.16B",
+        "description": "Bitwise exclusive-OR (XOR) of two 128-bit vectors.",
+        "data_types": ["uint32x4_t"],
+        "category": "Bitwise",
+        "architecture": "AArch32/AArch64",
+        "latency": "1-2 cycles (Cortex-A78 class)",
+        "throughput": "2-4 per cycle",
+        "example": (
+            'uint32x4_t a = vld1q_u32(ptr_a);\n'
+            'uint32x4_t b = vld1q_u32(ptr_b);\n'
+            'uint32x4_t result = veorq_u32(a, b);  // a ^ b'
+        ),
+    },
+    "vmvnq_u32": {
+        "signature": "uint32x4_t vmvnq_u32(uint32x4_t a)",
+        "instruction": "MVN Vd.16B, Vn.16B  (alias: NOT)",
+        "description": "Bitwise NOT (ones' complement) of a 128-bit vector.",
+        "data_types": ["uint32x4_t"],
+        "category": "Bitwise",
+        "architecture": "AArch32/AArch64",
+        "latency": "1-2 cycles (Cortex-A78 class)",
+        "throughput": "2-4 per cycle",
+        "example": (
+            'uint32x4_t a = vld1q_u32(ptr_a);\n'
+            'uint32x4_t inv = vmvnq_u32(a);  // ~a'
+        ),
+    },
+    "vbslq_u32": {
+        "signature": "uint32x4_t vbslq_u32(uint32x4_t mask, uint32x4_t a, uint32x4_t b)",
+        "instruction": "BSL Vd.16B, Vn.16B, Vm.16B",
+        "description": (
+            "Bitwise select: for each bit, if mask bit is 1 select from a, else select from b. "
+            "Equivalent to (mask & a) | (~mask & b). Very useful for branchless conditional operations."
+        ),
+        "data_types": ["uint32x4_t"],
+        "category": "Bitwise",
+        "architecture": "AArch32/AArch64",
+        "latency": "1-2 cycles (Cortex-A78 class)",
+        "throughput": "2-4 per cycle",
+        "example": (
+            'uint32x4_t mask = vcgtq_f32(a, b);  // compare\n'
+            'uint32x4_t result = vbslq_u32(mask,\n'
+            '    vreinterpretq_u32_f32(a),\n'
+            '    vreinterpretq_u32_f32(b));  // select a where a > b'
+        ),
+    },
+    # --- Shuffle/Permute ---
+    "vzip1q_f32": {
+        "signature": "float32x4_t vzip1q_f32(float32x4_t a, float32x4_t b)",
+        "instruction": "ZIP1 Vd.4S, Vn.4S, Vm.4S",
+        "description": (
+            "Interleave the lower halves of two vectors. "
+            "Result: {a[0], b[0], a[1], b[1]}."
+        ),
+        "data_types": ["float32x4_t"],
+        "category": "Shuffle/Permute",
+        "architecture": "AArch64",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t a = {1, 2, 3, 4};\n'
+            'float32x4_t b = {5, 6, 7, 8};\n'
+            'float32x4_t z = vzip1q_f32(a, b);  // {1, 5, 2, 6}'
+        ),
+    },
+    "vuzp1q_f32": {
+        "signature": "float32x4_t vuzp1q_f32(float32x4_t a, float32x4_t b)",
+        "instruction": "UZP1 Vd.4S, Vn.4S, Vm.4S",
+        "description": (
+            "De-interleave (unzip) even elements from two vectors. "
+            "Result: {a[0], a[2], b[0], b[2]}."
+        ),
+        "data_types": ["float32x4_t"],
+        "category": "Shuffle/Permute",
+        "architecture": "AArch64",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t a = {1, 2, 3, 4};\n'
+            'float32x4_t b = {5, 6, 7, 8};\n'
+            'float32x4_t u = vuzp1q_f32(a, b);  // {1, 3, 5, 7}'
+        ),
+    },
+    "vrev64q_f32": {
+        "signature": "float32x4_t vrev64q_f32(float32x4_t a)",
+        "instruction": "REV64 Vd.4S, Vn.4S",
+        "description": (
+            "Reverse elements within each 64-bit doubleword. Swaps pairs of 32-bit floats: "
+            "{a[0], a[1], a[2], a[3]} -> {a[1], a[0], a[3], a[2]}."
+        ),
+        "data_types": ["float32x4_t"],
+        "category": "Shuffle/Permute",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t a = {1, 2, 3, 4};\n'
+            'float32x4_t r = vrev64q_f32(a);  // {2, 1, 4, 3}'
+        ),
+    },
+    "vtrnq_f32": {
+        "signature": "float32x4x2_t vtrnq_f32(float32x4_t a, float32x4_t b)",
+        "instruction": "TRN1/TRN2 Vd.4S, Vn.4S, Vm.4S",
+        "description": (
+            "Transpose elements from two vectors. Returns two vectors: "
+            "TRN1 = {a[0], b[0], a[2], b[2]}, TRN2 = {a[1], b[1], a[3], b[3]}. "
+            "Useful for matrix transpose operations."
+        ),
+        "data_types": ["float32x4x2_t", "float32x4_t"],
+        "category": "Shuffle/Permute",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t row0 = {1, 2, 3, 4};\n'
+            'float32x4_t row1 = {5, 6, 7, 8};\n'
+            'float32x4x2_t t = vtrnq_f32(row0, row1);\n'
+            '// t.val[0] = {1, 5, 3, 7}\n'
+            '// t.val[1] = {2, 6, 4, 8}'
+        ),
+    },
+    "vextq_f32": {
+        "signature": "float32x4_t vextq_f32(float32x4_t a, float32x4_t b, const int n)",
+        "instruction": "EXT Vd.16B, Vn.16B, Vm.16B, #imm",
+        "description": (
+            "Extract a vector from a pair of vectors. Concatenates a and b and extracts "
+            "4 elements starting at index n. Useful for sliding window operations."
+        ),
+        "data_types": ["float32x4_t"],
+        "category": "Shuffle/Permute",
+        "architecture": "AArch32/AArch64",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "2 per cycle",
+        "example": (
+            'float32x4_t a = {1, 2, 3, 4};\n'
+            'float32x4_t b = {5, 6, 7, 8};\n'
+            'float32x4_t e = vextq_f32(a, b, 1);  // {2, 3, 4, 5}'
+        ),
+    },
+    # --- Reduction (AArch64 only) ---
+    "vaddvq_f32": {
+        "signature": "float32_t vaddvq_f32(float32x4_t a)",
+        "instruction": "FADDP (repeated) -- pairwise add to scalar",
+        "description": (
+            "Horizontal (across-vector) add: sum all four float32 lanes and return a scalar. "
+            "AArch64 only. Equivalent to a[0] + a[1] + a[2] + a[3]."
+        ),
+        "data_types": ["float32_t", "float32x4_t"],
+        "category": "Reduction",
+        "architecture": "AArch64",
+        "latency": "4-6 cycles (Cortex-A78 class)",
+        "throughput": "1 per cycle",
+        "example": (
+            'float32x4_t v = vld1q_f32(data);\n'
+            'float sum = vaddvq_f32(v);  // sum of all 4 lanes'
+        ),
+    },
+    "vmaxvq_f32": {
+        "signature": "float32_t vmaxvq_f32(float32x4_t a)",
+        "instruction": "FMAXP (repeated) -- pairwise max to scalar",
+        "description": (
+            "Horizontal (across-vector) maximum: return the maximum value across all four "
+            "float32 lanes. AArch64 only."
+        ),
+        "data_types": ["float32_t", "float32x4_t"],
+        "category": "Reduction",
+        "architecture": "AArch64",
+        "latency": "4-6 cycles (Cortex-A78 class)",
+        "throughput": "1 per cycle",
+        "example": (
+            'float32x4_t v = vld1q_f32(data);\n'
+            'float mx = vmaxvq_f32(v);  // max of all 4 lanes'
+        ),
+    },
+    # --- Dot Product (ARMv8.2+) ---
+    "vdotq_s32": {
+        "signature": "int32x4_t vdotq_s32(int32x4_t acc, int8x16_t a, int8x16_t b)",
+        "instruction": "SDOT Vd.4S, Vn.16B, Vm.16B",
+        "description": (
+            "Signed integer dot product. For each 32-bit lane, multiply four corresponding "
+            "8-bit elements from a and b, sum the four products, and accumulate into acc. "
+            "Four independent dot products in parallel. Key intrinsic for ML/AI int8 inference."
+        ),
+        "data_types": ["int32x4_t", "int8x16_t"],
+        "category": "Dot Product",
+        "architecture": "AArch64 (ARMv8.2+, FEAT_DotProd)",
+        "latency": "3-4 cycles (Cortex-A78 class)",
+        "throughput": "1-2 per cycle",
+        "example": (
+            'int32x4_t acc = vdupq_n_s32(0);\n'
+            'int8x16_t a = vld1q_s8(weights);\n'
+            'int8x16_t b = vld1q_s8(activations);\n'
+            'acc = vdotq_s32(acc, a, b);  // 4 parallel dot products'
+        ),
+    },
+    # --- Crypto ---
+    "vaeseq_u8": {
+        "signature": "uint8x16_t vaeseq_u8(uint8x16_t data, uint8x16_t key)",
+        "instruction": "AESE Vd.16B, Vn.16B",
+        "description": (
+            "AES single round encryption: performs SubBytes and ShiftRows stages of a single "
+            "AES round. XORs the data with the round key first. Must be followed by AESMC "
+            "(MixColumns) for a complete round except the final round."
+        ),
+        "data_types": ["uint8x16_t"],
+        "category": "Crypto",
+        "architecture": "AArch64 (FEAT_AES)",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "1-2 per cycle",
+        "example": (
+            'uint8x16_t state = vld1q_u8(plaintext);\n'
+            'uint8x16_t rk = vld1q_u8(round_key);\n'
+            'state = vaeseq_u8(state, rk);  // SubBytes + ShiftRows\n'
+            'state = vaesmcq_u8(state);      // MixColumns'
+        ),
+    },
+    "vaesdq_u8": {
+        "signature": "uint8x16_t vaesdq_u8(uint8x16_t data, uint8x16_t key)",
+        "instruction": "AESD Vd.16B, Vn.16B",
+        "description": (
+            "AES single round decryption: performs InvSubBytes and InvShiftRows stages of a "
+            "single AES decryption round. XORs the data with the round key first. Must be "
+            "followed by AESIMC (InvMixColumns) for a complete round except the final round."
+        ),
+        "data_types": ["uint8x16_t"],
+        "category": "Crypto",
+        "architecture": "AArch64 (FEAT_AES)",
+        "latency": "2-3 cycles (Cortex-A78 class)",
+        "throughput": "1-2 per cycle",
+        "example": (
+            'uint8x16_t state = vld1q_u8(ciphertext);\n'
+            'uint8x16_t rk = vld1q_u8(round_key);\n'
+            'state = vaesdq_u8(state, rk);  // InvSubBytes + InvShiftRows\n'
+            'state = vaesimcq_u8(state);     // InvMixColumns'
+        ),
+    },
+}
+
+
+def _format_neon_intrinsic(name: str, data: dict) -> str:
+    """Format a single NEON intrinsic entry as readable text."""
+    lines: list[str] = []
+    lines.append(f"# NEON Intrinsic: {name}")
+    lines.append("")
+    lines.append(f"**Signature:** `{data['signature']}`")
+    lines.append(f"**Instruction:** {data['instruction']}")
+    lines.append(f"**Category:** {data['category']}")
+    lines.append(f"**Architecture:** {data['architecture']}")
+    lines.append("")
+    lines.append("## Description")
+    lines.append(data["description"])
+    lines.append("")
+    lines.append("## Performance (Cortex-A78 class)")
+    lines.append(f"- Latency: {data['latency']}")
+    lines.append(f"- Throughput: {data['throughput']}")
+    lines.append("")
+    lines.append("## Data Types")
+    lines.append(", ".join(data["data_types"]))
+    lines.append("")
+    lines.append("## Example")
+    lines.append("```c")
+    lines.append(data["example"])
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def _format_neon_overview() -> str:
+    """Format an overview table of all NEON intrinsics grouped by category."""
+    # Group intrinsics by category
+    categories: dict[str, list[str]] = {}
+    for name, data in _NEON_INTRINSICS.items():
+        cat = data["category"]
+        if cat not in categories:
+            categories[cat] = []
+        categories[cat].append(name)
+
+    lines: list[str] = []
+    lines.append("# NEON / Advanced SIMD Intrinsics -- Overview")
+    lines.append("")
+    lines.append(f"Total intrinsics: {len(_NEON_INTRINSICS)}")
+    lines.append("")
+
+    for cat in categories:
+        lines.append(f"## {cat}")
+        lines.append("")
+        lines.append(f"{'Intrinsic':<22} {'Instruction':<38} Architecture")
+        lines.append("-" * 90)
+        for name in sorted(categories[cat]):
+            d = _NEON_INTRINSICS[name]
+            lines.append(f"  {name:<20} {d['instruction']:<38} {d['architecture']}")
+        lines.append("")
+
+    lines.append("Use explain_neon_intrinsic(<name>) for full details on any intrinsic.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def explain_neon_intrinsic(intrinsic_name: str) -> str:
+    """Look up an ARM NEON / Advanced SIMD intrinsic by name.
+
+    Returns the full intrinsic signature, equivalent assembly instruction,
+    supported data types, typical latency/throughput info, a C usage example,
+    and which architecture it is available on.
+
+    Args:
+        intrinsic_name: The NEON intrinsic name (e.g. "vaddq_f32", "vld1q_u8").
+                        Case-insensitive.
+                        Use "list" or "overview" to see all available intrinsics grouped by category.
+    """
+    key = intrinsic_name.strip().lower()
+
+    if key in ("list", "overview"):
+        return _format_neon_overview()
+
+    if key in _NEON_INTRINSICS:
+        return _format_neon_intrinsic(key, _NEON_INTRINSICS[key])
+
+    # Not found -- try to suggest intrinsics from a similar category
+    # Heuristic: extract a prefix pattern to guess category
+    suggestions: list[str] = []
+
+    # Try prefix-based matching (e.g. "vadd" matches "vaddq_f32", "vaddq_s32", "vaddvq_f32")
+    prefix = key.split("_")[0] if "_" in key else key[:4]
+    for name in _NEON_INTRINSICS:
+        if name.startswith(prefix):
+            suggestions.append(name)
+
+    # If no prefix matches, suggest all intrinsic names
+    if not suggestions:
+        suggestions = sorted(_NEON_INTRINSICS.keys())
+
+    suggestion_text = ", ".join(sorted(suggestions)[:10])
+    return (
+        f"Error: NEON intrinsic '{intrinsic_name}' not found.\n\n"
+        f"Did you mean one of: {suggestion_text}\n\n"
+        f"Use explain_neon_intrinsic('list') to see all available intrinsics."
+    )
+
+# ---------------------------------------------------------------------------
+# Tool 18: explain_sme_tile  --  ARM SME (Scalable Matrix Extension) topics
+# ---------------------------------------------------------------------------
+
+_SME_TOPICS: dict[str, dict] = {
+    "overview": {
+        "title": "SME Overview",
+        "description": (
+            "ARM Scalable Matrix Extension (SME) is an architecture extension introduced "
+            "in ARMv9.2-A that adds native matrix operations to AArch64.  SME builds on "
+            "the Scalable Vector Extension (SVE/SVE2) foundation and introduces three "
+            "major architectural concepts:\n\n"
+            "1. **ZA tile storage** -- a new square, two-dimensional register array whose "
+            "dimensions are tied to the SVE vector length (VL).  If VL is 128 bits "
+            "(16 bytes), then ZA is 16x16 bytes = 256 bytes.  At VL=512 it is 64x64 "
+            "bytes = 4 KiB.\n\n"
+            "2. **Streaming SVE mode** -- a new processor mode (PSTATE.SM=1) that gives "
+            "access to ZA and a streaming-capable subset of SVE, but disables classic "
+            "NEON (AdvSIMD) and non-streaming SVE instructions.\n\n"
+            "3. **Outer-product accumulation** -- dedicated instructions (FMOPA, FMOPS, "
+            "SMOPA, UMOPA, ...) that compute the outer product of two SVE vectors and "
+            "accumulate the result directly into a ZA tile, enabling very high "
+            "throughput for matrix-multiply workloads.\n\n"
+            "Comparison:\n"
+            "  - NEON: fixed 128-bit SIMD, no matrix concept.\n"
+            "  - SVE/SVE2: scalable 128-2048 bit vectors, 1-D operations.\n"
+            "  - SME: scalable 2-D tile storage + outer-product instructions.\n\n"
+            "SME is designed for GEMM-heavy workloads (machine learning inference/training, "
+            "scientific computing) where the dominant operation is matrix multiplication."
+        ),
+        "key_points": [
+            "SME introduced in ARMv9.2-A; requires SVE2 as a prerequisite",
+            "ZA is a square 2-D register file: SVL x SVL bytes (SVL = streaming VL in bytes)",
+            "Streaming SVE mode (PSTATE.SM) gates access to ZA and streaming-SVE instructions",
+            "Outer-product instructions (FMOPA, etc.) accumulate directly into ZA tiles",
+            "SME does NOT replace SVE -- it complements it for 2-D workloads",
+            "NEON/AdvSIMD is unavailable while in streaming mode",
+        ],
+        "instructions": ["SMSTART", "SMSTOP", "FMOPA", "FMOPS", "ZERO"],
+        "code_example": (
+            "// Enable streaming SVE mode + ZA\n"
+            "SMSTART          // sets PSTATE.SM=1, PSTATE.ZA=1\n\n"
+            "// Zero the ZA tile\n"
+            "ZERO {ZA}        // clear all of ZA\n\n"
+            "// Outer product: ZA0.S += Z0.S outer Z1.S\n"
+            "FMOPA ZA0.S, P0/M, P1/M, Z0.S, Z1.S\n\n"
+            "// Store a horizontal slice of ZA\n"
+            "ST1W {ZA0H.S[W12, 0]}, P0, [X0]\n\n"
+            "// Disable streaming mode + ZA\n"
+            "SMSTOP           // sets PSTATE.SM=0, PSTATE.ZA=0"
+        ),
+        "related_topics": ["za_storage", "streaming_mode", "outer_product"],
+    },
+    "za_storage": {
+        "title": "SME: ZA Tile Storage",
+        "description": (
+            "ZA is a two-dimensional register array introduced by SME.  Its size is "
+            "tied to the Streaming SVE Vector Length (SVL):\n\n"
+            "  ZA size = SVL_bytes x SVL_bytes\n\n"
+            "For example, if SVL = 128 bits = 16 bytes, ZA is 16x16 = 256 bytes.  "
+            "At SVL = 512 bits = 64 bytes, ZA is 64x64 = 4096 bytes.\n\n"
+            "ZA is subdivided into *tiles* whose number and size depend on the element "
+            "width used:\n\n"
+            "  Element width | Tiles        | Each tile\n"
+            "  8-bit         | ZA0-ZA15     | (SVL/8)  x (SVL/8)  bytes\n"
+            "  16-bit        | ZA0-ZA7      | (SVL/16) x (SVL/16) halfwords\n"
+            "  32-bit        | ZA0-ZA3      | (SVL/32) x (SVL/32) words\n"
+            "  64-bit        | ZA0-ZA1      | (SVL/64) x (SVL/64) doublewords\n"
+            "  128-bit       | ZA0          | (SVL/128)x(SVL/128) quadwords\n\n"
+            "All tiles overlap -- they are views into the same ZA storage.  Writing "
+            "ZA0.B affects bits that are also visible through ZA0.S, ZA1.S, etc.\n\n"
+            "ZA is accessible only when PSTATE.ZA=1 (set by SMSTART ZA or SMSTART SM).  "
+            "When PSTATE.ZA transitions from 0 to 1, all of ZA is zeroed.  When "
+            "PSTATE.ZA transitions from 1 to 0, the contents are architecturally lost "
+            "(the OS may lazily save them)."
+        ),
+        "key_points": [
+            "ZA size = SVL_bytes x SVL_bytes (square, tied to streaming VL)",
+            "8-bit element view: ZA0-ZA15 (16 tiles)",
+            "16-bit element view: ZA0-ZA7 (8 tiles)",
+            "32-bit element view: ZA0-ZA3 (4 tiles)",
+            "64-bit element view: ZA0-ZA1 (2 tiles)",
+            "128-bit element view: ZA0 (1 tile)",
+            "All tiles alias the same underlying storage",
+            "ZA is zeroed on activation (PSTATE.ZA 0->1) and lost on deactivation (1->0)",
+            "SMSTART ZA enables ZA without entering streaming mode; SMSTART SM enables both",
+        ],
+        "instructions": ["SMSTART", "SMSTOP", "ZERO", "RDSVL"],
+        "code_example": (
+            "// Query the streaming VL in bytes\n"
+            "RDSVL X0, #1     // X0 = SVL in bytes\n\n"
+            "// Enable ZA only (not streaming mode)\n"
+            "SMSTART ZA       // PSTATE.ZA=1, ZA zeroed\n\n"
+            "// Zero specific tiles\n"
+            "ZERO {ZA0.S, ZA1.S}  // zero 32-bit tiles 0 and 1\n\n"
+            "// Disable ZA\n"
+            "SMSTOP ZA        // PSTATE.ZA=0, contents lost"
+        ),
+        "related_topics": ["overview", "streaming_mode", "tile_load_store"],
+    },
+    "streaming_mode": {
+        "title": "SME: Streaming SVE Mode",
+        "description": (
+            "Streaming SVE mode is a distinct processor execution mode controlled by "
+            "PSTATE.SM.  When SM=1, the processor operates in streaming mode:\n\n"
+            "**What changes in streaming mode:**\n"
+            "  - Classic NEON (AdvSIMD) instructions are UNDEFINED and will trap.\n"
+            "  - Only the *streaming-compatible* subset of SVE/SVE2 is available.\n"
+            "  - The vector length may differ from non-streaming SVE VL; it is the "
+            "Streaming SVE Vector Length (SVL), queried with RDSVL.\n"
+            "  - ZA tile storage is accessible (if PSTATE.ZA=1).\n"
+            "  - SME outer-product instructions (FMOPA, FMOPS, etc.) are available.\n\n"
+            "**What stays the same:**\n"
+            "  - All integer/FP scalar instructions work normally.\n"
+            "  - Memory ordering, exceptions, and privilege levels are unchanged.\n\n"
+            "SMSTART and SMSTOP control streaming mode:\n"
+            "  SMSTART       -- sets both PSTATE.SM=1 and PSTATE.ZA=1\n"
+            "  SMSTART SM    -- sets only PSTATE.SM=1\n"
+            "  SMSTART ZA    -- sets only PSTATE.ZA=1 (no streaming mode)\n"
+            "  SMSTOP        -- clears both PSTATE.SM and PSTATE.ZA\n"
+            "  SMSTOP SM     -- clears only PSTATE.SM\n"
+            "  SMSTOP ZA     -- clears only PSTATE.ZA\n\n"
+            "On entry to streaming mode, the contents of the SVE Z/P/FFR registers "
+            "are zeroed.  On exit, they are zeroed again.  This means you cannot "
+            "pass data between streaming and non-streaming mode via vector registers "
+            "without explicit save/restore."
+        ),
+        "key_points": [
+            "PSTATE.SM=1 activates streaming SVE mode",
+            "NEON/AdvSIMD instructions become UNDEFINED in streaming mode",
+            "Only streaming-compatible SVE instructions are available",
+            "SVE vector length may differ: non-streaming VL vs streaming SVL",
+            "Z/P/FFR registers are zeroed on SM transitions (0->1 and 1->0)",
+            "SMSTART sets SM+ZA; SMSTART SM sets only SM; SMSTART ZA sets only ZA",
+            "SMSTOP is the inverse; clears SM, ZA, or both",
+        ],
+        "instructions": ["SMSTART", "SMSTOP", "RDSVL", "MSR", "MRS"],
+        "code_example": (
+            "// Enter streaming mode (enables SM + ZA)\n"
+            "SMSTART           // PSTATE.SM=1, PSTATE.ZA=1\n\n"
+            "// Read streaming vector length\n"
+            "RDSVL X0, #1      // X0 = SVL in bytes\n"
+            "CNTW X1           // X1 = number of 32-bit elements per vector\n\n"
+            "// ... perform streaming SVE + SME operations ...\n\n"
+            "// Exit streaming mode only (keep ZA alive)\n"
+            "SMSTOP SM         // PSTATE.SM=0, Z/P/FFR zeroed\n\n"
+            "// Later, release ZA\n"
+            "SMSTOP ZA         // PSTATE.ZA=0, ZA contents lost"
+        ),
+        "related_topics": ["overview", "za_storage", "programming_model"],
+    },
+    "outer_product": {
+        "title": "SME: Outer Product Operations",
+        "description": (
+            "The core computational primitive in SME is the outer-product-and-accumulate "
+            "instruction.  Given two SVE vector registers, the instruction computes their "
+            "outer product and adds (or subtracts) the result into a ZA tile.\n\n"
+            "For FMOPA ZA0.S, P0/M, P1/M, Z0.S, Z1.S:\n"
+            "  - For each active row i (where P0[i]=1) and active column j (where P1[j]=1):\n"
+            "    ZA0.S[i][j] += Z0.S[i] * Z1.S[j]\n\n"
+            "This single instruction performs (SVL/32)^2 FP32 multiply-accumulates in one "
+            "step -- for SVL=512, that is 16x16 = 256 FMACs.\n\n"
+            "**Comparison with traditional approach:**\n"
+            "  Traditional FMLA: processes one row at a time, VL elements per instruction.\n"
+            "  FMOPA: processes an entire (SVL/element)^2 tile in one instruction.\n"
+            "  For a K-iteration GEMM inner loop, FMOPA needs K instructions vs K*N/VL "
+            "for FMLA.\n\n"
+            "**Available variants:**\n"
+            "  FMOPA / FMOPS  -- FP32, FP64 outer product add/subtract\n"
+            "  BFMOPA / BFMOPS -- BF16 inputs, FP32 accumulation (2x throughput)\n"
+            "  SMOPA / SMOPS   -- signed int8 inputs, int32 accumulation\n"
+            "  UMOPA / UMOPS   -- unsigned int8 inputs, int32 accumulation\n"
+            "  USMOPA / USMOPS -- unsigned x signed int8 -> int32"
+        ),
+        "key_points": [
+            "FMOPA computes outer product of two SVE vectors and accumulates into ZA tile",
+            "One instruction performs (SVL/element_size)^2 multiply-accumulates",
+            "Dual predicate masks: P0 controls active rows, P1 controls active columns",
+            "BF16 variants double throughput by packing 2 BF16 elements per 32-bit lane",
+            "INT8 variants quadruple throughput: 4 int8 values per 32-bit lane",
+            "FMOPS subtracts the outer product (useful for negation patterns)",
+            "Far more efficient than FMLA loop for GEMM-style computation",
+        ],
+        "instructions": ["FMOPA", "FMOPS", "BFMOPA", "BFMOPS", "SMOPA", "SMOPS", "UMOPA", "UMOPS"],
+        "code_example": (
+            "// FP32 matrix multiply: C[MxN] += A[MxK] * B[KxN]\n"
+            "// Assume SVL=512 => 16 FP32 elements per vector\n"
+            "// Each FMOPA produces a 16x16 tile update\n\n"
+            "SMSTART               // enter streaming mode + enable ZA\n"
+            "ZERO {ZA0.S}          // clear accumulator tile\n\n"
+            "// Inner loop over K dimension\n"
+            "loop:\n"
+            "  LD1W {Z0.S}, P0/Z, [X_A]   // load column of A (M elements)\n"
+            "  LD1W {Z1.S}, P1/Z, [X_B]   // load row of B (N elements)\n"
+            "  FMOPA ZA0.S, P0/M, P1/M, Z0.S, Z1.S  // ZA0 += Z0 outer Z1\n"
+            "  ADD X_A, X_A, X_STRIDE_A\n"
+            "  ADD X_B, X_B, X_STRIDE_B\n"
+            "  SUBS X_K, X_K, #1\n"
+            "  B.NE loop\n\n"
+            "// Store result tile\n"
+            "MOV W12, #0\n"
+            "store_loop:\n"
+            "  ST1W {ZA0H.S[W12, 0]}, P0, [X_C]\n"
+            "  ADD X_C, X_C, X_STRIDE_C\n"
+            "  ADD W12, W12, #1\n"
+            "  CMP W12, X_ROWS\n"
+            "  B.LT store_loop\n\n"
+            "SMSTOP                // exit streaming mode + release ZA"
+        ),
+        "related_topics": ["mopa_fmopa", "za_storage", "tile_load_store"],
+    },
+    "tile_load_store": {
+        "title": "SME: Tile Load and Store Operations",
+        "description": (
+            "SME provides instructions to load and store ZA tile data from/to memory.  "
+            "There are two levels of access:\n\n"
+            "**Full ZA save/restore (context switch):**\n"
+            "  LDR ZA[Wv, #imm], [Xn]   -- load one horizontal vector-slice of ZA\n"
+            "  STR ZA[Wv, #imm], [Xn]    -- store one horizontal vector-slice of ZA\n"
+            "  These are used for context switching.  The loop variable Wv ranges from "
+            "0 to SVL_bytes-1, storing the entire ZA array one row at a time.\n\n"
+            "**Tile slice access (computational):**\n"
+            "  LD1B/LD1H/LD1W/LD1D {ZAn[HV].T[Wv, #imm]}, Pg/Z, [Xn, Xm]\n"
+            "  ST1B/ST1H/ST1W/ST1D {ZAn[HV].T[Wv, #imm]}, Pg, [Xn, Xm]\n"
+            "  H = horizontal slice, V = vertical slice.\n"
+            "  These access a single row (H) or column (V) of a specific tile.\n\n"
+            "**Horizontal vs Vertical slices:**\n"
+            "  - ZA0H.S[W12, 0] = row W12 of tile ZA0 (32-bit elements)\n"
+            "  - ZA0V.S[W12, 0] = column W12 of tile ZA0 (32-bit elements)\n"
+            "  The H/V suffix selects the slice direction.  Both are predicated.\n\n"
+            "The slice index uses a W-register (W12-W15) plus an immediate offset.  "
+            "The hardware computes (Wv + imm) MOD (SVL/element_bytes) to select the "
+            "row or column."
+        ),
+        "key_points": [
+            "LDR/STR ZA -- load/store full ZA rows for context switch (one slice per instruction)",
+            "LD1B/ST1B through LD1D/ST1D -- typed tile slice access for computation",
+            "Horizontal slice (H): accesses a row of the tile",
+            "Vertical slice (V): accesses a column of the tile",
+            "Slice index = (Wv + imm) MOD (SVL / element_bytes)",
+            "Only W12-W15 can be used as slice index registers",
+            "Full ZA context save requires SVL_bytes iterations of STR",
+        ],
+        "instructions": ["LDR", "STR", "LD1B", "LD1H", "LD1W", "LD1D", "ST1B", "ST1H", "ST1W", "ST1D"],
+        "code_example": (
+            "// Save entire ZA to memory (context switch)\n"
+            "RDSVL X1, #1          // X1 = SVL in bytes = number of rows\n"
+            "MOV W12, #0\n"
+            "save_loop:\n"
+            "  STR ZA[W12, 0], [X0]  // store row W12\n"
+            "  ADD X0, X0, X1        // advance by SVL bytes\n"
+            "  ADD W12, W12, #1\n"
+            "  CMP W12, W1\n"
+            "  B.LT save_loop\n\n"
+            "// Load a horizontal slice of tile ZA0 (32-bit)\n"
+            "MOV W12, #3\n"
+            "LD1W {ZA0H.S[W12, 0]}, P0/Z, [X2, X3, LSL #2]\n\n"
+            "// Store a vertical slice of tile ZA1 (16-bit)\n"
+            "MOV W13, #0\n"
+            "ST1H {ZA1V.H[W13, 0]}, P1, [X4, X5, LSL #1]"
+        ),
+        "related_topics": ["za_storage", "context_switching", "outer_product"],
+    },
+    "mopa_fmopa": {
+        "title": "SME: FMOPA Instruction Detail",
+        "description": (
+            "FMOPA (Floating-point Matrix Outer Product and Accumulate) is the "
+            "central computational instruction in SME.\n\n"
+            "**Syntax:**\n"
+            "  FMOPA ZAda.S, Pn/M, Pm/M, Zn.S, Zm.S\n\n"
+            "**Operand breakdown:**\n"
+            "  ZAda.S -- destination/accumulator tile (e.g., ZA0.S for 32-bit)\n"
+            "    'd' selects which tile (0-3 for .S, 0-1 for .D)\n"
+            "  Pn/M   -- row predicate (merging).  Inactive rows are not modified.\n"
+            "  Pm/M   -- column predicate (merging).  Inactive columns are not modified.\n"
+            "  Zn.S   -- first source vector (provides row values)\n"
+            "  Zm.S   -- second source vector (provides column values)\n\n"
+            "**Operation (pseudocode):**\n"
+            "  for row = 0 to (SVL/32)-1:\n"
+            "    if Pn[row] == 1:\n"
+            "      for col = 0 to (SVL/32)-1:\n"
+            "        if Pm[col] == 1:\n"
+            "          ZAda.S[row][col] += Zn.S[row] * Zm.S[col]\n\n"
+            "**Predication:**\n"
+            "  Both predicates use *merging* semantics (/M): elements corresponding "
+            "to inactive predicate lanes are left UNCHANGED in the accumulator.  "
+            "This allows partial tile updates for edge cases (e.g., last tile block "
+            "in a matrix that does not fill the full SVL width).\n\n"
+            "**Variants:**\n"
+            "  FMOPA ZAda.D -- FP64 outer product (ZA0.D or ZA1.D)\n"
+            "  FMOPA ZAda.S, ..., Zn.H, Zm.H -- widening FP16->FP32\n"
+            "  BFMOPA ZAda.S, ..., Zn.H, Zm.H -- BF16->FP32 widening\n"
+            "  FMOPS -- same but SUBTRACTS the outer product from the tile"
+        ),
+        "key_points": [
+            "FMOPA ZAda.S, Pn/M, Pm/M, Zn.S, Zm.S -- full syntax",
+            "ZAda: destination tile and accumulator (read-modify-write)",
+            "Pn/M: row predicate with merging (inactive rows unchanged)",
+            "Pm/M: column predicate with merging (inactive cols unchanged)",
+            "Zn: provides row values, Zm: provides column values",
+            "For .S tiles (FP32): ZA0-ZA3 available, each (SVL/32)x(SVL/32)",
+            "For .D tiles (FP64): ZA0-ZA1 available, each (SVL/64)x(SVL/64)",
+            "One FMOPA does (SVL/element_bits)^2 FP multiply-accumulate operations",
+        ],
+        "instructions": ["FMOPA", "FMOPS", "BFMOPA", "BFMOPS"],
+        "code_example": (
+            "// Detailed FMOPA example: 4x4 FP32 outer product (SVL=128)\n"
+            "// Z0.S = [a0, a1, a2, a3]  (row vector)\n"
+            "// Z1.S = [b0, b1, b2, b3]  (col vector)\n"
+            "//\n"
+            "// Result in ZA0.S:\n"
+            "//   ZA0.S[0][0] += a0*b0  ZA0.S[0][1] += a0*b1  ...\n"
+            "//   ZA0.S[1][0] += a1*b0  ZA0.S[1][1] += a1*b1  ...\n"
+            "//   ZA0.S[2][0] += a2*b0  ZA0.S[2][1] += a2*b1  ...\n"
+            "//   ZA0.S[3][0] += a3*b0  ZA0.S[3][1] += a3*b1  ...\n\n"
+            "PTRUE P0.S            // all rows active\n"
+            "PTRUE P1.S            // all columns active\n"
+            "FMOPA ZA0.S, P0/M, P1/M, Z0.S, Z1.S\n\n"
+            "// Partial update (only first 2 rows, first 3 columns):\n"
+            "WHILELT P0.S, XZR, #2  // P0 = {1,1,0,0}\n"
+            "WHILELT P1.S, XZR, #3  // P1 = {1,1,1,0}\n"
+            "FMOPA ZA0.S, P0/M, P1/M, Z2.S, Z3.S"
+        ),
+        "related_topics": ["outer_product", "za_storage", "streaming_mode"],
+    },
+    "sme2": {
+        "title": "SME2 Extensions",
+        "description": (
+            "SME2, introduced in ARMv9.4-A, significantly extends the Scalable Matrix "
+            "Extension with multi-vector operations, structured memory access, and a "
+            "new lookup table register.\n\n"
+            "**Multi-vector outer products:**\n"
+            "  SME2 adds FMOPA variants that take 2-register or 4-register groups as "
+            "inputs.  For example, FMOPA ZA.S, {Z0.S-Z1.S}, {Z2.S-Z3.S} performs "
+            "two outer products and accumulates them into the same tile, doubling "
+            "throughput without additional instructions.\n\n"
+            "**ZT0 lookup table register:**\n"
+            "  SME2 introduces ZT0, a 512-bit (64-byte) register used for lookup-table "
+            "operations.  The LUTI2 and LUTI4 instructions perform 2-bit or 4-bit "
+            "indexed lookups into ZT0, useful for weight dequantization in ML inference "
+            "(e.g., expanding 4-bit quantized weights to FP16/BF16).\n\n"
+            "**Structured load/store:**\n"
+            "  LD1B/ST1B (and other typed variants) gain multi-register forms:\n"
+            "  LD1W {Z0.S, Z4.S, Z8.S, Z12.S}, PNn/Z, [Xn, #0, MUL VL]\n"
+            "  These load/store 2 or 4 registers with a single instruction using the "
+            "new predicate-as-counter (PNn) registers.\n\n"
+            "**MOVT instruction:**\n"
+            "  MOVT copies data between ZT0 and general-purpose/vector registers, "
+            "enabling ZT0 to be initialized with lookup table contents."
+        ),
+        "key_points": [
+            "SME2 introduced in ARMv9.4-A as an extension to SME",
+            "Multi-vector FMOPA: 2- and 4-register group inputs double/quadruple outer product throughput",
+            "ZT0: new 512-bit lookup table register for weight dequantization",
+            "LUTI2/LUTI4: 2-bit and 4-bit indexed lookups into ZT0",
+            "Structured multi-register loads/stores with predicate-as-counter (PN) registers",
+            "MOVT: move data to/from ZT0 register",
+            "Designed for ML inference with quantized weights (INT4/INT2 -> FP16/BF16)",
+        ],
+        "instructions": ["FMOPA", "LUTI2", "LUTI4", "MOVT", "LD1B", "ST1B"],
+        "code_example": (
+            "// SME2: Multi-vector outer product\n"
+            "FMOPA ZA.S, {Z0.S-Z1.S}, {Z2.S-Z3.S}\n"
+            "// Equivalent to:\n"
+            "//   FMOPA ZA.S, ..., Z0.S, Z2.S\n"
+            "//   FMOPA ZA.S, ..., Z1.S, Z3.S\n\n"
+            "// SME2: Lookup table dequantization\n"
+            "// Load 64-byte lookup table into ZT0\n"
+            "LDR ZT0, [X0]         // X0 -> 64-byte LUT\n\n"
+            "// 4-bit lookup: expand quantized weights\n"
+            "LUTI4 {Z0.B}, ZT0, Z16[0]   // Z0 = ZT0[Z16 indices]\n\n"
+            "// SME2: Structured multi-register load\n"
+            "LD1W {Z0.S, Z4.S}, PN8/Z, [X1, #0, MUL VL]"
+        ),
+        "related_topics": ["overview", "outer_product", "mopa_fmopa"],
+    },
+    "context_switching": {
+        "title": "SME: Context Switching and OS Support",
+        "description": (
+            "Because ZA is large stateful storage, the OS kernel must manage it during "
+            "context switches, signal delivery, and process migration.\n\n"
+            "**ZA state size:**\n"
+            "  ZA contains SVL_bytes x SVL_bytes of data.  At SVL=512, this is 4 KiB; "
+            "at SVL=2048, it would be 64 KiB.  Use RDSVL to determine the size:\n"
+            "    RDSVL X0, #1  -> X0 = SVL in bytes\n"
+            "    size = X0 * X0  (total ZA bytes)\n\n"
+            "**Save/restore procedure:**\n"
+            "  // Save\n"
+            "  RDSVL X1, #1\n"
+            "  MOV W12, #0\n"
+            "  loop: STR ZA[W12, 0], [X_buf]; ADD X_buf, X_buf, X1; ...\n\n"
+            "  // Restore\n"
+            "  SMSTART ZA          // enables ZA, zeros it\n"
+            "  MOV W12, #0\n"
+            "  loop: LDR ZA[W12, 0], [X_buf]; ADD X_buf, X_buf, X1; ...\n\n"
+            "**Lazy save optimization:**\n"
+            "  Linux implements lazy ZA save: when a task is preempted while ZA is active, "
+            "the kernel does NOT immediately save ZA.  Instead, it sets PSTATE.ZA=0 for "
+            "the incoming task.  If the original task is rescheduled before any other task "
+            "uses ZA, no save/restore was needed.  Only when another task executes SMSTART "
+            "ZA does the kernel trap and save the first task's ZA.\n\n"
+            "**Key OS responsibilities:**\n"
+            "  1. Track per-thread PSTATE.SM and PSTATE.ZA state.\n"
+            "  2. Allocate SVL^2-byte ZA save buffer (or defer until needed).\n"
+            "  3. Save/restore ZA on context switch if active.\n"
+            "  4. Handle signal delivery: save ZA before signal handler, restore after.\n"
+            "  5. Support ptrace access to ZA for debuggers."
+        ),
+        "key_points": [
+            "ZA size = SVL^2 bytes; can be large (up to 64 KiB at SVL=2048)",
+            "Use RDSVL to determine SVL at runtime for buffer allocation",
+            "Save: loop STR ZA[W12, 0] for each row; Restore: SMSTART ZA + loop LDR",
+            "Linux uses lazy save: defer ZA save until another task needs ZA",
+            "Kernel must track PSTATE.SM and PSTATE.ZA per thread",
+            "Signal delivery must save/restore ZA around signal handlers",
+            "ZA save buffer must be RDSVL-based (not compile-time fixed) for portability",
+        ],
+        "instructions": ["SMSTART", "SMSTOP", "STR", "LDR", "RDSVL"],
+        "code_example": (
+            "// Linux kernel: save ZA state for context switch\n"
+            "// (simplified pseudocode in assembly)\n\n"
+            "mrs   X0, SVCR         // read streaming VCR\n"
+            "tbz   X0, #1, skip     // bit 1 = PSTATE.ZA; skip if not active\n\n"
+            "// ZA is active -- save it\n"
+            "rdsvl X1, #1           // X1 = SVL bytes\n"
+            "mul   X2, X1, X1       // X2 = total ZA size\n"
+            "// Allocate X2 bytes for save area (or use preallocated buffer)\n\n"
+            "mov   W12, #0\n"
+            "save_loop:\n"
+            "  str  ZA[W12, 0], [X_buf]\n"
+            "  add  X_buf, X_buf, X1\n"
+            "  add  W12, W12, #1\n"
+            "  cmp  W12, W1\n"
+            "  b.lt save_loop\n\n"
+            "smstop za              // release ZA (PSTATE.ZA=0)\n"
+            "skip:"
+        ),
+        "related_topics": ["za_storage", "streaming_mode", "programming_model"],
+    },
+    "programming_model": {
+        "title": "SME: Programming Model and Function Attributes",
+        "description": (
+            "SME introduces new function type attributes for the AAPCS64 (ARM Procedure "
+            "Call Standard) to handle streaming mode and ZA state across function calls.\n\n"
+            "**Function type attributes:**\n\n"
+            "  __arm_streaming\n"
+            "    The function requires streaming SVE mode.  The caller must enter "
+            "streaming mode (SMSTART SM) before calling.  On entry, PSTATE.SM=1 is "
+            "guaranteed.  The compiler may insert SMSTART/SMSTOP at call boundaries.\n\n"
+            "  __arm_streaming_compatible\n"
+            "    The function works in BOTH streaming and non-streaming mode.  It only "
+            "uses instructions that are valid in both modes.  The compiler does not "
+            "insert any mode switches.\n\n"
+            "  __arm_za_shared\n"
+            "    The function uses ZA and expects it to be live on entry/exit.  The "
+            "caller is responsible for having PSTATE.ZA=1.  The function may read and "
+            "modify ZA.\n\n"
+            "  __arm_new_za\n"
+            "    The function creates a new ZA context.  On entry, the compiler inserts "
+            "SMSTART ZA (creating fresh, zeroed ZA).  On return, it inserts SMSTOP ZA.  "
+            "This is for functions that use ZA internally but do not share it.\n\n"
+            "**Example C function signatures:**\n"
+            "  void sgemm_tile(float *A, float *B, float *C, int M, int N, int K)\n"
+            "    __arm_streaming __arm_za_shared;\n\n"
+            "  void helper(int x) __arm_streaming_compatible;\n\n"
+            "  void top_level_matmul(float *A, float *B, float *C)\n"
+            "    __arm_new_za;\n\n"
+            "**Key rules:**\n"
+            "  - A non-streaming function calling an __arm_streaming function must have "
+            "the compiler insert SMSTART SM before and SMSTOP SM after the call.\n"
+            "  - __arm_za_shared functions must not be called without ZA enabled.\n"
+            "  - __arm_new_za functions manage their own ZA lifetime."
+        ),
+        "key_points": [
+            "__arm_streaming: function requires streaming SVE mode (PSTATE.SM=1)",
+            "__arm_streaming_compatible: function works in both streaming and non-streaming mode",
+            "__arm_za_shared: function reads/writes shared ZA state (caller enables ZA)",
+            "__arm_new_za: function creates and destroys its own ZA context",
+            "Compiler inserts SMSTART/SMSTOP at call boundaries for mode mismatches",
+            "Z/P/FFR registers are zeroed on streaming mode transitions",
+            "AAPCS64 defines callee-saved rules for ZA and streaming state",
+        ],
+        "instructions": ["SMSTART", "SMSTOP"],
+        "code_example": (
+            "// C function using SME with attributes\n\n"
+            "#include <arm_sme.h>\n\n"
+            "// This function runs in streaming mode and uses shared ZA\n"
+            "void sme_gemm_kernel(const float *A, const float *B,\n"
+            "                     int K, int tile_row, int tile_col)\n"
+            "    __arm_streaming __arm_za_shared\n"
+            "{\n"
+            "    svfloat32_t a_vec, b_vec;\n"
+            "    svbool_t p0 = svptrue_b32();\n\n"
+            "    for (int k = 0; k < K; k++) {\n"
+            "        a_vec = svld1_f32(p0, &A[k * tile_row]);\n"
+            "        b_vec = svld1_f32(p0, &B[k * tile_col]);\n"
+            "        svmopa_za32_f32_m(0, p0, p0, a_vec, b_vec);\n"
+            "    }\n"
+            "}\n\n"
+            "// Top-level function that owns ZA\n"
+            "void matmul(float *A, float *B, float *C, int M, int N, int K)\n"
+            "    __arm_new_za\n"
+            "{\n"
+            "    svzero_za();  // zero all ZA tiles\n"
+            "    sme_gemm_kernel(A, B, K, M, N);\n"
+            "    // ... store ZA tiles to C ...\n"
+            "}"
+        ),
+        "related_topics": ["streaming_mode", "context_switching", "detection"],
+    },
+    "detection": {
+        "title": "SME: Runtime Feature Detection",
+        "description": (
+            "Before using SME instructions, software must verify that the CPU supports "
+            "SME.  Detection differs by privilege level.\n\n"
+            "**EL1+ (kernel / bare-metal):**\n"
+            "  Read ID_AA64SMFR0_EL1 (SME Feature Register 0):\n"
+            "    Bits [63:60] (FA64)   -- if non-zero, full A64 instruction set in "
+            "streaming mode\n"
+            "    Bits [55:52] (SMEver) -- 0=SME, 1=SME2, 2=SME2p1\n"
+            "    Bits [51:48] (I16I64) -- int16 x int64 outer product support\n"
+            "    Bits [43:40] (F64F64) -- FP64 outer product support\n"
+            "    Bits [35:32] (I16I32) -- int16 x int32 outer product support\n"
+            "    Bits [3:0]   (F32F32) -- FP32 outer product support (1 = supported)\n\n"
+            "  Also check ID_AA64PFR1_EL1 bits [27:24] (SME field):\n"
+            "    0b0001 = SME implemented\n"
+            "    0b0010 = SME2 implemented\n\n"
+            "**EL0 (userspace Linux):**\n"
+            "  Use HWCAP2 flags via getauxval(AT_HWCAP2):\n"
+            "    HWCAP2_SME        (1 << 23) -- SME supported\n"
+            "    HWCAP2_SME_I16I64 (1 << 24)\n"
+            "    HWCAP2_SME_F64F64 (1 << 25)\n"
+            "    HWCAP2_SME_I8I32  (1 << 26)\n"
+            "    HWCAP2_SME_F16F32 (1 << 27)\n"
+            "    HWCAP2_SME_B16F32 (1 << 28)\n"
+            "    HWCAP2_SME_F32F32 (1 << 29)\n"
+            "    HWCAP2_SME_FA64   (1 << 30)\n"
+            "    HWCAP2_SME2       (1UL << 37) -- SME2 supported\n\n"
+            "  Alternative: read /proc/cpuinfo 'Features' line for 'sme', 'sme2'.\n\n"
+            "**CPACR_EL1 / CPTR_EL2 access control:**\n"
+            "  The kernel must enable SME access by setting CPACR_EL1.SMEN=0b11 and "
+            "(if EL2 is present) CPTR_EL2 appropriately.  Without this, SMSTART will "
+            "trap."
+        ),
+        "key_points": [
+            "ID_AA64SMFR0_EL1: per-feature SME capability register (EL1+)",
+            "ID_AA64PFR1_EL1 bits [27:24]: SME/SME2 implementation level",
+            "Linux userspace: getauxval(AT_HWCAP2) with HWCAP2_SME flag (1<<23)",
+            "HWCAP2_SME2 (1<<37) indicates SME2 support",
+            "/proc/cpuinfo Features line shows 'sme' and 'sme2' tokens",
+            "CPACR_EL1.SMEN must be 0b11 to allow EL0 SME access",
+            "Without kernel enablement, SMSTART traps to EL1",
+        ],
+        "instructions": ["MRS", "SMSTART", "RDSVL"],
+        "code_example": (
+            "// C: Runtime detection on Linux\n"
+            "#include <sys/auxv.h>\n"
+            "#include <stdio.h>\n\n"
+            "#ifndef HWCAP2_SME\n"
+            "#define HWCAP2_SME  (1UL << 23)\n"
+            "#endif\n"
+            "#ifndef HWCAP2_SME2\n"
+            "#define HWCAP2_SME2 (1UL << 37)\n"
+            "#endif\n\n"
+            "int detect_sme(void) {\n"
+            "    unsigned long hwcap2 = getauxval(AT_HWCAP2);\n"
+            "    if (hwcap2 & HWCAP2_SME2) {\n"
+            "        printf(\"SME2 supported\\n\");\n"
+            "        return 2;\n"
+            "    } else if (hwcap2 & HWCAP2_SME) {\n"
+            "        printf(\"SME supported\\n\");\n"
+            "        return 1;\n"
+            "    }\n"
+            "    printf(\"SME not supported\\n\");\n"
+            "    return 0;\n"
+            "}\n\n"
+            "// Assembly: kernel-level detection\n"
+            "// MRS X0, ID_AA64PFR1_EL1\n"
+            "// UBFX X0, X0, #24, #4  // extract SME field\n"
+            "// CBZ X0, no_sme        // 0 = not implemented"
+        ),
+        "related_topics": ["overview", "programming_model", "streaming_mode"],
+    },
+}
+
+
+def _format_sme_topic(topic_key: str, topic: dict) -> str:
+    """Format an SME topic entry into a readable string."""
+    lines: list[str] = []
+
+    lines.append(f"# SME: {topic['title']}")
+    lines.append("")
+    lines.append("## Description")
+    lines.append(topic["description"])
+    lines.append("")
+
+    lines.append("## Key Points")
+    for pt in topic["key_points"]:
+        lines.append(f"- {pt}")
+    lines.append("")
+
+    lines.append("## Related Instructions")
+    lines.append(", ".join(topic["instructions"]))
+    lines.append("")
+
+    lines.append("## Example")
+    lines.append("```")
+    lines.append(topic["code_example"])
+    lines.append("```")
+    lines.append("")
+
+    lines.append("## Related Topics")
+    for rt in topic["related_topics"]:
+        if rt in _SME_TOPICS:
+            lines.append(f'Use `explain_sme_tile("{rt}")` for {_SME_TOPICS[rt]["title"]}.')
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def explain_sme_tile(operation: str) -> str:
+    """Explain ARM SME (Scalable Matrix Extension) tile operations, ZA storage,
+    streaming SVE mode, and related concepts.
+
+    SME adds a 2-D tile register (ZA) and outer-product instructions for
+    efficient matrix multiplication on AArch64.
+
+    Args:
+        operation: One of:
+            "overview" -- What SME is, SME vs SVE vs NEON, the ZA tile architecture
+            "za_storage" -- ZA array structure, tile sizes, SMSTART/SMSTOP lifecycle
+            "streaming_mode" -- SMSTART/SMSTOP, what changes in streaming mode, PSTATE.SM
+            "outer_product" -- FMOPA/FMOPS, outer product into ZA, int8/bf16/fp32 variants
+            "tile_load_store" -- LDR/STR ZA, LD1B/ST1B slice access, H vs V slices
+            "mopa_fmopa" -- Detailed FMOPA.S instruction breakdown with operands
+            "sme2" -- SME2 extensions: multi-vector, ZT0, LUTI2/LUTI4, MOVT
+            "context_switching" -- OS responsibilities, lazy save, ZA state management
+            "programming_model" -- __arm_streaming, __arm_za_shared, function attributes
+            "detection" -- ID_AA64SMFR0_EL1, HWCAP2_SME, runtime feature detection
+    """
+    key = operation.strip().lower()
+
+    if key not in _SME_TOPICS:
+        valid = ", ".join(sorted(_SME_TOPICS.keys()))
+        return (
+            f"Error: '{operation}' is not a recognised SME topic.\n\n"
+            f"Valid topics: {valid}\n"
+            f'Use `explain_sme_tile("overview")` for a general introduction.'
+        )
+
+    return _format_sme_topic(key, _SME_TOPICS[key])
+
+# ---------------------------------------------------------------------------
+# Tool 18: suggest_optimization — ARM-specific code optimization patterns
+# ---------------------------------------------------------------------------
+
+_OPTIMIZATION_PATTERNS: dict[str, dict] = {
+    "matrix_multiply": {
+        "description": (
+            "Dense matrix multiplication (C = A * B). A fundamental kernel in linear algebra, "
+            "neural-network inference, and scientific computing. ARM cores have wide SIMD datapaths "
+            "that can be exploited with tiling, fused multiply-add, and specialized dot-product / "
+            "matrix instructions."
+        ),
+        "baseline_approach": (
+            "A naive triple-nested loop (i, j, k) with scalar FP multiply and add. The compiler "
+            "may auto-vectorize the inner loop but typically cannot tile or reorder across loops, "
+            "leading to poor cache utilization and low SIMD throughput."
+        ),
+        "optimizations": [
+            {
+                "technique": "NEON 128-bit tile-based multiply",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "Tile the matrix into 4x4 (FP32) or 8x8 (FP16) blocks that fit in NEON "
+                    "registers. Use FMLA (fused multiply-add) to accumulate partial results "
+                    "in register tiles, then store back. This maximises register reuse and "
+                    "minimises memory traffic."
+                ),
+                "code_snippet": (
+                    "// 4x4 FP32 tile using NEON intrinsics\n"
+                    "float32x4_t c0 = vdupq_n_f32(0);\n"
+                    "for (int k = 0; k < K; k++) {\n"
+                    "    float32x4_t a0 = vld1q_f32(&A[i*K + k]);\n"
+                    "    float32x4_t b0 = vld1q_f32(&B[k*N + j]);\n"
+                    "    c0 = vfmaq_f32(c0, a0, b0);\n"
+                    "}\n"
+                    "vst1q_f32(&C[i*N + j], c0);"
+                ),
+                "speedup": "4-8x over scalar (FP32), up to 16x with FP16",
+            },
+            {
+                "technique": "SVE scalable vectorization",
+                "architecture": "AArch64 (ARMv8.2+ with SVE)",
+                "description": (
+                    "Use SVE predicated loops that adapt to the hardware vector length "
+                    "(128-2048 bits). Write once, run optimally across Neoverse V1 (256-bit), "
+                    "V2 (128-bit SVE2), and A64FX (512-bit)."
+                ),
+                "code_snippet": (
+                    "svfloat32_t acc = svdup_f32(0);\n"
+                    "svbool_t pg = svwhilelt_b32(k, K);\n"
+                    "while (svptest_first(svptrue_b32(), pg)) {\n"
+                    "    svfloat32_t a = svld1(pg, &A[i*K + k]);\n"
+                    "    svfloat32_t b = svld1(pg, &B[k*N + j]);\n"
+                    "    acc = svmla_m(pg, acc, a, b);\n"
+                    "    k += svcntw();\n"
+                    "    pg = svwhilelt_b32(k, K);\n"
+                    "}"
+                ),
+                "speedup": "Scales linearly with vector length; 2x over NEON on 256-bit SVE",
+            },
+            {
+                "technique": "SME outer-product accumulation",
+                "architecture": "AArch64 (ARMv9.2+ with SME)",
+                "description": (
+                    "Scalable Matrix Extension (SME) provides FMOPA (outer product and accumulate) "
+                    "that writes directly into ZA tile registers. A single instruction computes a "
+                    "rank-1 update of the output tile, dramatically reducing loop overhead."
+                ),
+                "code_snippet": (
+                    "// SME outer-product: ZA += a * b^T\n"
+                    "FMOPA ZA0.S, P0/M, P1/M, Z0.S, Z1.S"
+                ),
+                "speedup": "10-20x over scalar; designed for GEMM workloads",
+            },
+            {
+                "technique": "SDOT/UDOT for int8 quantized multiply",
+                "architecture": "AArch64 (ARMv8.2+ with DotProd)",
+                "description": (
+                    "For int8 quantized inference, SDOT/UDOT compute a 4-element dot product "
+                    "per lane, accumulating into int32. This gives 4x the throughput of int8 "
+                    "multiply-accumulate sequences."
+                ),
+                "code_snippet": (
+                    "int32x4_t acc = vdupq_n_s32(0);\n"
+                    "int8x16_t a = vld1q_s8(&A[i]);\n"
+                    "int8x16_t b = vld1q_s8(&B[j]);\n"
+                    "acc = vdotq_s32(acc, a, b);  // 16 int8 MACs -> 4 int32 results"
+                ),
+                "speedup": "4x over SMULL+SADALP sequence; 16x over scalar int8",
+            },
+        ],
+        "compiler_flags": [
+            "-O2",
+            "-march=armv8.2-a+dotprod",
+            "-march=armv9-a+sme  (for SME)",
+            "-ffast-math  (enables FMA contraction)",
+        ],
+        "target_core_notes": {
+            "cortex-a78": "2 NEON pipes, dual-issue FMLA with 4-cycle latency. Tile to 4x4 FP32 for best throughput.",
+            "neoverse-v2": "4 NEON pipes, 128-bit SVE2, 2x256-bit SVE on Neoverse V1. Use SVE for portability.",
+            "cortex-a55": "Single NEON pipe, in-order core. Keep tiles small (4x1), avoid complex scheduling.",
+        },
+    },
+    "memcpy": {
+        "description": (
+            "Memory copy operation — moving a block of bytes from source to destination. "
+            "One of the most frequently called functions; even small improvements have "
+            "system-wide impact. ARM provides wide load/store pairs and cache management "
+            "instructions for optimal throughput."
+        ),
+        "baseline_approach": (
+            "A byte-by-byte copy loop. Even with -O2, the compiler may only emit LDR/STR "
+            "of 8-byte (64-bit) chunks, leaving half the memory bandwidth unused on cores "
+            "with 128-bit or wider datapaths."
+        ),
+        "optimizations": [
+            {
+                "technique": "LDP/STP 128-bit pairs",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "Use LDP/STP (Load Pair / Store Pair) of 64-bit registers to move 16 bytes "
+                    "per instruction, or LDP/STP of Q-registers to move 32 bytes. Unroll 2-4x "
+                    "to saturate the load/store unit."
+                ),
+                "code_snippet": (
+                    "// Copy 64 bytes per iteration using Q-register pairs\n"
+                    "LDP  Q0, Q1, [X1], #32\n"
+                    "LDP  Q2, Q3, [X1], #32\n"
+                    "STP  Q0, Q1, [X0], #32\n"
+                    "STP  Q2, Q3, [X0], #32"
+                ),
+                "speedup": "4-8x over byte-by-byte; 2x over 64-bit LDR/STR",
+            },
+            {
+                "technique": "NEON load/store with post-increment",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "NEON VLD1/VST1 with post-increment addressing moves 16 bytes and updates "
+                    "the pointer in a single instruction, reducing loop overhead."
+                ),
+                "code_snippet": (
+                    "uint8x16_t data;\n"
+                    "for (size_t i = 0; i < len; i += 16) {\n"
+                    "    data = vld1q_u8(src + i);\n"
+                    "    vst1q_u8(dst + i, data);\n"
+                    "}"
+                ),
+                "speedup": "4x over byte copy; good for small-to-medium buffers",
+            },
+            {
+                "technique": "DC ZVA for zero-fill destination",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "When copying into a fresh allocation that will be fully overwritten, use "
+                    "DC ZVA (Data Cache Zero by VA) to zero the cache line without fetching from "
+                    "memory, then overwrite with source data. Eliminates read-for-ownership traffic."
+                ),
+                "code_snippet": (
+                    "// Zero cache line (typically 64 bytes) before writing\n"
+                    "DC ZVA, X0   // zero cache line at X0, no memory read needed\n"
+                    "STP  Q0, Q1, [X0]\n"
+                    "STP  Q2, Q3, [X0, #32]"
+                ),
+                "speedup": "Up to 2x for large copies by eliminating read-for-ownership",
+            },
+            {
+                "technique": "Software prefetch with PRFM",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "Insert PRFM PLDL1STRM instructions 2-3 cache lines ahead of the current "
+                    "read position to hide memory latency. Use PSTL1STRM for store prefetch."
+                ),
+                "code_snippet": (
+                    "PRFM PLDL1STRM, [X1, #256]  // prefetch source 4 lines ahead\n"
+                    "PRFM PSTL1STRM, [X0, #256]  // prefetch dest for writing\n"
+                    "LDP  Q0, Q1, [X1], #32\n"
+                    "STP  Q0, Q1, [X0], #32"
+                ),
+                "speedup": "10-30% improvement on large copies (> L2 cache size)",
+            },
+        ],
+        "compiler_flags": [
+            "-O2",
+            "-march=armv8-a",
+            "-moutline-atomics  (for glibc memcpy selection)",
+        ],
+        "target_core_notes": {
+            "cortex-a78": "128-bit load/store, 2x LDP/STP per cycle. Unroll 4x for peak bandwidth.",
+            "neoverse-v2": "256-bit load/store paths, 2x LDP Q per cycle. DC ZVA is 64 bytes.",
+            "cortex-a55": "64-bit load/store unit. LDP of X registers is optimal; Q-reg pairs may serialize.",
+        },
+    },
+    "memset": {
+        "description": (
+            "Memory fill operation — writing a constant byte value across a block of memory. "
+            "The zero case (memset to 0) is especially common and can exploit ARM's cache "
+            "zeroing instructions for maximum throughput."
+        ),
+        "baseline_approach": (
+            "A byte-by-byte store loop. The compiler may widen to 64-bit stores with STR, "
+            "but does not exploit cache-line zeroing or NEON fill patterns."
+        ),
+        "optimizations": [
+            {
+                "technique": "STP of zero register pairs",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "Use STP XZR, XZR to store 16 zero bytes per instruction. The zero "
+                    "register is free (no data dependency), so the core can issue these "
+                    "at full store bandwidth."
+                ),
+                "code_snippet": (
+                    "// Zero 64 bytes per iteration\n"
+                    "STP  XZR, XZR, [X0], #16\n"
+                    "STP  XZR, XZR, [X0], #16\n"
+                    "STP  XZR, XZR, [X0], #16\n"
+                    "STP  XZR, XZR, [X0], #16"
+                ),
+                "speedup": "8x over byte-by-byte STR",
+            },
+            {
+                "technique": "DC ZVA for page-aligned zeroing",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "DC ZVA (Data Cache Zero by VA) zeroes an entire cache line (typically "
+                    "64 bytes) without reading from memory first. For large page-aligned "
+                    "regions this is the fastest zeroing method."
+                ),
+                "code_snippet": (
+                    "// Zero entire pages using DC ZVA\n"
+                    "// Read DCZID_EL0 for block size (usually 64 bytes)\n"
+                    "loop:\n"
+                    "  DC ZVA, X0\n"
+                    "  ADD  X0, X0, #64\n"
+                    "  CMP  X0, X1\n"
+                    "  B.LT loop"
+                ),
+                "speedup": "2-4x over STP XZR pairs for large (>4KB) regions",
+            },
+            {
+                "technique": "NEON fill for non-zero values",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "For non-zero fill values, broadcast the byte into a NEON Q register with "
+                    "VDUP and use STP Q pairs to write 32 bytes per iteration."
+                ),
+                "code_snippet": (
+                    "uint8x16_t fill = vdupq_n_u8(value);\n"
+                    "for (size_t i = 0; i < len; i += 32) {\n"
+                    "    vst1q_u8(dst + i, fill);\n"
+                    "    vst1q_u8(dst + i + 16, fill);\n"
+                    "}"
+                ),
+                "speedup": "4-8x over byte stores; works for any fill value",
+            },
+        ],
+        "compiler_flags": [
+            "-O2",
+            "-march=armv8-a",
+        ],
+        "target_core_notes": {
+            "cortex-a78": "DC ZVA block is 64 bytes. Two STP ports; unroll 4x for peak throughput.",
+            "neoverse-v2": "DC ZVA block is 64 bytes. Can issue 2x128-bit stores per cycle.",
+            "cortex-a55": "DC ZVA may be slower on in-order cores; benchmark before using on small buffers.",
+        },
+    },
+    "dot_product": {
+        "description": (
+            "Dot product of two vectors: sum(a[i] * b[i]). Fundamental to DSP, ML inference, "
+            "and linear algebra. ARM offers widening multiply-accumulate, dedicated dot-product "
+            "instructions, and scalable vector reductions."
+        ),
+        "baseline_approach": (
+            "A scalar loop with FP multiply and add. Without -ffast-math, the compiler cannot "
+            "reorder the accumulation, limiting SIMD opportunities. Typically achieves 1 FLOP "
+            "per cycle on a modern ARM core."
+        ),
+        "optimizations": [
+            {
+                "technique": "NEON FMLA accumulation",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "Load 4 FP32 values from each vector, multiply-accumulate into a NEON "
+                    "accumulator, then reduce with FADDP at the end. Unroll 2-4x to hide "
+                    "FMLA latency (typically 4 cycles)."
+                ),
+                "code_snippet": (
+                    "float32x4_t acc0 = vdupq_n_f32(0);\n"
+                    "float32x4_t acc1 = vdupq_n_f32(0);\n"
+                    "for (int i = 0; i < N; i += 8) {\n"
+                    "    acc0 = vfmaq_f32(acc0, vld1q_f32(&a[i]), vld1q_f32(&b[i]));\n"
+                    "    acc1 = vfmaq_f32(acc1, vld1q_f32(&a[i+4]), vld1q_f32(&b[i+4]));\n"
+                    "}\n"
+                    "float32x4_t sum = vaddq_f32(acc0, acc1);\n"
+                    "float result = vaddvq_f32(sum);  // horizontal add"
+                ),
+                "speedup": "4-8x over scalar (FP32), depends on unroll factor",
+            },
+            {
+                "technique": "SDOT/UDOT for integer vectors",
+                "architecture": "AArch64 (ARMv8.2+ with DotProd)",
+                "description": (
+                    "SDOT/UDOT compute 4-element dot products of int8 values, accumulating "
+                    "into int32 lanes. Processes 16 int8 multiplies per instruction."
+                ),
+                "code_snippet": (
+                    "int32x4_t acc = vdupq_n_s32(0);\n"
+                    "for (int i = 0; i < N; i += 16) {\n"
+                    "    int8x16_t va = vld1q_s8(&a[i]);\n"
+                    "    int8x16_t vb = vld1q_s8(&b[i]);\n"
+                    "    acc = vdotq_s32(acc, va, vb);\n"
+                    "}\n"
+                    "int32_t result = vaddvq_s32(acc);"
+                ),
+                "speedup": "16x over scalar int8 multiply-add",
+            },
+            {
+                "technique": "SVE predicated dot product",
+                "architecture": "AArch64 (ARMv8.2+ with SVE)",
+                "description": (
+                    "SVE predicated loops handle arbitrary vector lengths and automatically "
+                    "mask the final iteration. Combine with FMLA for FP or SDOT for integer."
+                ),
+                "code_snippet": (
+                    "svfloat32_t acc = svdup_f32(0);\n"
+                    "for (int i = 0; i < N; i += svcntw()) {\n"
+                    "    svbool_t pg = svwhilelt_b32(i, N);\n"
+                    "    svfloat32_t va = svld1(pg, &a[i]);\n"
+                    "    svfloat32_t vb = svld1(pg, &b[i]);\n"
+                    "    acc = svmla_m(pg, acc, va, vb);\n"
+                    "}\n"
+                    "float result = svaddv(svptrue_b32(), acc);"
+                ),
+                "speedup": "Scales with SVE vector length; portable across implementations",
+            },
+            {
+                "technique": "SME outer product for batched dot products",
+                "architecture": "AArch64 (ARMv9.2+ with SME)",
+                "description": (
+                    "When computing multiple dot products (e.g. matrix-vector), SME FMOPA "
+                    "accumulates an outer product tile. Each instruction does VL*VL FP MACs."
+                ),
+                "code_snippet": (
+                    "FMOPA ZA0.S, P0/M, P1/M, Z0.S, Z1.S  // ZA += Z0 outer Z1"
+                ),
+                "speedup": "VL^2 FLOPs per instruction; ideal for batched workloads",
+            },
+        ],
+        "compiler_flags": [
+            "-O2",
+            "-ffast-math  (allows reordering of FP accumulation)",
+            "-march=armv8.2-a+dotprod",
+            "-march=armv8.2-a+sve  (for SVE path)",
+        ],
+        "target_core_notes": {
+            "cortex-a78": "2 FMLA pipes, 4-cycle latency. Unroll 4x accumulators for full throughput. SDOT supported.",
+            "neoverse-v2": "4 FP pipes, 128-bit SVE2. SDOT throughput is 2 per cycle. Use SVE for loop vectorization.",
+            "cortex-a55": "1 FMLA pipe, 4-cycle latency. 2 accumulators sufficient. SDOT available on ARMv8.2 variants.",
+        },
+    },
+    "sort": {
+        "description": (
+            "Sorting arrays of integers or floats. Comparison-based sorts are branch-heavy; "
+            "ARM provides branchless conditional operations and SIMD compare-and-swap networks "
+            "for small-array optimization."
+        ),
+        "baseline_approach": (
+            "Standard qsort or std::sort with scalar comparisons and conditional branches. "
+            "Branch mispredictions on random data cause ~15 cycle penalties per mispredicted "
+            "branch on modern ARM cores."
+        ),
+        "optimizations": [
+            {
+                "technique": "NEON compare-and-swap for small arrays",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "For small arrays (4-16 elements), use NEON CMGT/BSL to build a sorting "
+                    "network entirely in SIMD registers. No branches needed — the compare-and-swap "
+                    "is done with bitwise select."
+                ),
+                "code_snippet": (
+                    "// Branchless min/max of two NEON vectors\n"
+                    "uint32x4_t mask = vcgtq_u32(a, b);\n"
+                    "uint32x4_t lo = vbslq_u32(mask, b, a);  // min\n"
+                    "uint32x4_t hi = vbslq_u32(mask, a, b);  // max"
+                ),
+                "speedup": "2-4x for sorting 4-16 elements vs scalar sort",
+            },
+            {
+                "technique": "CSEL for branchless min/max",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "Replace branch-based comparisons with CMP+CSEL (conditional select). "
+                    "Eliminates branch misprediction entirely for comparison-heavy inner loops."
+                ),
+                "code_snippet": (
+                    "CMP  W0, W1\n"
+                    "CSEL W2, W0, W1, LT  // W2 = min(W0, W1)\n"
+                    "CSEL W3, W1, W0, LT  // W3 = max(W0, W1)"
+                ),
+                "speedup": "Eliminates ~15 cycle branch misprediction penalty per compare",
+            },
+            {
+                "technique": "Prefetch for large-array sorting",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "During partitioning (quicksort) or merging (mergesort), prefetch the "
+                    "next cache line of each input stream with PRFM to hide memory latency."
+                ),
+                "code_snippet": (
+                    "PRFM PLDL1KEEP, [X0, #128]  // prefetch left partition\n"
+                    "PRFM PLDL1KEEP, [X1, #128]  // prefetch right partition"
+                ),
+                "speedup": "10-20% for arrays larger than L2 cache",
+            },
+        ],
+        "compiler_flags": [
+            "-O2",
+            "-march=armv8-a",
+        ],
+        "target_core_notes": {
+            "cortex-a78": "Good branch predictor (TAGE-like), but random data still causes ~10% misprediction. Use CSEL.",
+            "neoverse-v2": "Deep OoO buffer tolerates some misprediction. NEON sorting networks help on small partitions.",
+            "cortex-a55": "In-order core; branch misprediction very costly (~10 cycles). CSEL is essential.",
+        },
+    },
+    "string_search": {
+        "description": (
+            "Searching for a substring or byte pattern within a larger string/buffer. "
+            "ARM NEON can compare 16 bytes in parallel, and SVE can compare even wider "
+            "vectors with first-fault loads for safe overreads."
+        ),
+        "baseline_approach": (
+            "Byte-by-byte comparison (naive strstr) or compiler-generated LDRB+CMP loop. "
+            "Processes 1 byte per cycle at best, far below the memory bandwidth available."
+        ),
+        "optimizations": [
+            {
+                "technique": "NEON bytewise compare (16 bytes at a time)",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "Load 16 bytes, broadcast the search byte with VDUP, compare with VCEQ, "
+                    "then extract a bitmask with VSHRN+UMOV to find match positions. Processes "
+                    "16 bytes per iteration."
+                ),
+                "code_snippet": (
+                    "uint8x16_t needle = vdupq_n_u8(search_byte);\n"
+                    "for (size_t i = 0; i < len; i += 16) {\n"
+                    "    uint8x16_t hay = vld1q_u8(&str[i]);\n"
+                    "    uint8x16_t cmp = vceqq_u8(hay, needle);\n"
+                    "    // Extract match positions from cmp\n"
+                    "    uint64_t mask = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(cmp), 4)), 0);\n"
+                    "    if (mask) return i + __builtin_ctzll(mask) / 4;\n"
+                    "}"
+                ),
+                "speedup": "8-16x over byte-by-byte search",
+            },
+            {
+                "technique": "CRC32 for rolling hash (Rabin-Karp)",
+                "architecture": "AArch64 (ARMv8.1+)",
+                "description": (
+                    "Use the CRC32 instruction to compute a rolling hash of the search window. "
+                    "CRC32 has 3-cycle latency on most ARM cores and produces excellent hash "
+                    "distribution for string matching."
+                ),
+                "code_snippet": (
+                    "uint32_t hash = 0;\n"
+                    "for (int i = 0; i < pat_len; i++)\n"
+                    "    hash = __crc32b(hash, str[i]);\n"
+                    "// Roll the hash for each position\n"
+                    "// CRC32B X0, W0, W1"
+                ),
+                "speedup": "Efficient for multi-pattern search; O(n) average",
+            },
+            {
+                "technique": "SVE match/search instructions",
+                "architecture": "AArch64 (ARMv8.2+ with SVE2)",
+                "description": (
+                    "SVE2 provides MATCH instruction that compares each byte in a vector against "
+                    "a set of search characters. Combined with first-fault loads (LDFF1) for "
+                    "safe buffer-end handling without length checks."
+                ),
+                "code_snippet": (
+                    "svuint8_t needle = svdup_u8(search_byte);\n"
+                    "svbool_t pg = svptrue_b8();\n"
+                    "svuint8_t data = svldff1(pg, &str[i]);\n"
+                    "svbool_t match = svcmpeq(pg, data, needle);\n"
+                    "if (svptest_any(pg, match))\n"
+                    "    return i + svclastb(match, -1, svindex_u8(0, 1));"
+                ),
+                "speedup": "Scales with SVE vector length; safe end-of-buffer handling",
+            },
+        ],
+        "compiler_flags": [
+            "-O2",
+            "-march=armv8.1-a+crc",
+            "-march=armv8.2-a+sve2  (for SVE2 match)",
+        ],
+        "target_core_notes": {
+            "cortex-a78": "NEON 16-byte compare is 1 cycle. CRC32 is 3 cycles. Good for memchr-style searches.",
+            "neoverse-v2": "SVE2 MATCH instruction available. 128-bit SVE but efficient predication.",
+            "cortex-a55": "NEON compare works well; avoid complex extraction — use simpler UMAXV != 0 check first.",
+        },
+    },
+    "crc32": {
+        "description": (
+            "CRC-32 and CRC-32C checksum computation. Used in networking (Ethernet, iSCSI), "
+            "storage (ext4, Btrfs), and data integrity checks. ARM provides dedicated CRC "
+            "instructions and polynomial multiply for fast CRC."
+        ),
+        "baseline_approach": (
+            "Table-driven CRC computation processing 1 byte per iteration. Requires a 256-entry "
+            "lookup table and has a loop-carried dependency on the CRC accumulator, limiting "
+            "throughput to ~1 byte per 3-4 cycles."
+        ),
+        "optimizations": [
+            {
+                "technique": "CRC32 instruction (hardware)",
+                "architecture": "AArch64 (ARMv8.1+ with CRC)",
+                "description": (
+                    "ARMv8.1 added CRC32B/CRC32H/CRC32W/CRC32X instructions that compute "
+                    "CRC-32 on 1/2/4/8 bytes per instruction. CRC32CX processes 8 bytes in "
+                    "~3 cycles."
+                ),
+                "code_snippet": (
+                    "uint32_t crc = ~0;\n"
+                    "while (len >= 8) {\n"
+                    "    crc = __crc32d(crc, *(uint64_t*)buf);\n"
+                    "    buf += 8; len -= 8;\n"
+                    "}\n"
+                    "while (len--) crc = __crc32b(crc, *buf++);"
+                ),
+                "speedup": "8x over table-lookup per byte; ~2.7 bytes/cycle",
+            },
+            {
+                "technique": "PMULL for CRC-32C (polynomial multiply)",
+                "architecture": "AArch64 (ARMv8.0+ with Crypto)",
+                "description": (
+                    "Use PMULL (polynomial multiply long) to process 16 bytes at a time with "
+                    "carryless multiplication. Requires precomputed folding constants specific "
+                    "to the CRC polynomial."
+                ),
+                "code_snippet": (
+                    "// Fold 128 bits using PMULL\n"
+                    "poly128_t fold = vmull_p64(vget_low_p64(data), k1_k2);\n"
+                    "// XOR with next 128-bit block\n"
+                    "data = veorq_u8(vreinterpretq_u8_p128(fold), next_block);"
+                ),
+                "speedup": "4-8x over CRC32 instruction; up to 16 bytes/cycle",
+            },
+            {
+                "technique": "3-way interleaved pipeline",
+                "architecture": "AArch64 (ARMv8.1+ with CRC)",
+                "description": (
+                    "Split the buffer into 3 segments and compute CRC32 on each segment "
+                    "independently, then combine with polynomial reduction. This breaks the "
+                    "loop-carried dependency, allowing 3 CRC32 instructions in flight."
+                ),
+                "code_snippet": (
+                    "// Process 3 segments in parallel\n"
+                    "uint32_t crc0 = ~0, crc1 = 0, crc2 = 0;\n"
+                    "size_t seg = len / 3;\n"
+                    "for (size_t i = 0; i < seg; i += 8) {\n"
+                    "    crc0 = __crc32d(crc0, *(uint64_t*)(buf + i));\n"
+                    "    crc1 = __crc32d(crc1, *(uint64_t*)(buf + seg + i));\n"
+                    "    crc2 = __crc32d(crc2, *(uint64_t*)(buf + 2*seg + i));\n"
+                    "}\n"
+                    "// Combine with polynomial multiply reduction"
+                ),
+                "speedup": "~3x over single-stream CRC32; approaches memory bandwidth limit",
+            },
+        ],
+        "compiler_flags": [
+            "-O2",
+            "-march=armv8.1-a+crc",
+            "-march=armv8-a+crc+crypto  (for PMULL path)",
+        ],
+        "target_core_notes": {
+            "cortex-a78": "CRC32 is 3-cycle latency, 1/cycle throughput. 3-way interleave achieves ~8 bytes/cycle.",
+            "neoverse-v2": "CRC32 is 3-cycle latency. PMULL is 2 cycles. Use PMULL path for large buffers.",
+            "cortex-a55": "CRC32 is 3-cycle latency. Single-stream CRC32X is usually sufficient for small buffers.",
+        },
+    },
+    "aes_encrypt": {
+        "description": (
+            "AES block cipher encryption (AES-128/192/256). ARM Crypto Extensions provide "
+            "dedicated instructions that fuse SubBytes+ShiftRows (AESE) and MixColumns (AESMC) "
+            "for high-throughput encryption."
+        ),
+        "baseline_approach": (
+            "Software AES using lookup tables (T-tables). Vulnerable to cache-timing side "
+            "channels. Processes one block (~10 rounds) in ~200 cycles on a modern ARM core."
+        ),
+        "optimizations": [
+            {
+                "technique": "AESE+AESMC fused pair",
+                "architecture": "AArch64 (ARMv8.0+ with Crypto)",
+                "description": (
+                    "AESE performs SubBytes+ShiftRows+AddRoundKey; AESMC performs MixColumns. "
+                    "On most ARM cores, an AESE immediately followed by AESMC can fuse or "
+                    "pipeline efficiently, reducing the per-round cost."
+                ),
+                "code_snippet": (
+                    "// One AES round\n"
+                    "uint8x16_t state = vaeseq_u8(state, round_key);  // AESE\n"
+                    "state = vaesmcq_u8(state);                        // AESMC\n"
+                    "// Repeat for each round (10/12/14 for AES-128/192/256)"
+                ),
+                "speedup": "10-20x over T-table software AES; also eliminates timing side channels",
+            },
+            {
+                "technique": "Pipeline 4 blocks in parallel (CTR/ECB mode)",
+                "architecture": "AArch64 (ARMv8.0+ with Crypto)",
+                "description": (
+                    "In CTR or ECB mode, blocks are independent. Process 4 blocks simultaneously "
+                    "to hide the AESE+AESMC pipeline latency. Each block uses a separate set "
+                    "of NEON registers."
+                ),
+                "code_snippet": (
+                    "// 4-block parallel AES-128 in CTR mode\n"
+                    "for (int r = 0; r < 9; r++) {\n"
+                    "    s0 = vaesmcq_u8(vaeseq_u8(s0, rk[r]));\n"
+                    "    s1 = vaesmcq_u8(vaeseq_u8(s1, rk[r]));\n"
+                    "    s2 = vaesmcq_u8(vaeseq_u8(s2, rk[r]));\n"
+                    "    s3 = vaesmcq_u8(vaeseq_u8(s3, rk[r]));\n"
+                    "}\n"
+                    "// Final round (no AESMC)\n"
+                    "s0 = vaeseq_u8(s0, rk[9]) ^ rk[10];\n"
+                    "// ... same for s1, s2, s3"
+                ),
+                "speedup": "2-4x over single-block pipeline; approaches 1 byte/cycle",
+            },
+            {
+                "technique": "ARMv8 Crypto Extensions full pipeline",
+                "architecture": "AArch64 (ARMv8.0+ with Crypto)",
+                "description": (
+                    "Combine AESE/AESMC with AESD/AESIMC for decrypt. Use interleaved "
+                    "encrypt/MAC operations for AES-GCM (AESE + PMULL for GHASH). The crypto "
+                    "extensions are constant-time, preventing cache-timing attacks."
+                ),
+                "code_snippet": (
+                    "// AES-GCM: interleave AES-CTR and GHASH\n"
+                    "state = vaesmcq_u8(vaeseq_u8(state, rk));\n"
+                    "ghash = vmull_p64(ghash_lo, H_lo);  // PMULL for GHASH\n"
+                    "// Pipeline keeps both AES and PMULL units busy"
+                ),
+                "speedup": "AES-GCM at near AES-CTR speed; constant-time security guarantee",
+            },
+        ],
+        "compiler_flags": [
+            "-O2",
+            "-march=armv8-a+crypto",
+        ],
+        "target_core_notes": {
+            "cortex-a78": "AESE+AESMC fuse to 3-cycle latency. 4-block interleave achieves ~1 cycle/byte for AES-128.",
+            "neoverse-v2": "2 AES pipes, AESE+AESMC 2-cycle fused latency. Best throughput with 4-8 block interleave.",
+            "cortex-a55": "AESE is 3-cycle latency. 2-block interleave sufficient. Still 10x faster than software AES.",
+        },
+    },
+    "sha256": {
+        "description": (
+            "SHA-256 cryptographic hash computation. ARM provides dedicated SHA-256 "
+            "instructions that compute hash rounds directly in hardware, matching the "
+            "algorithm's structure."
+        ),
+        "baseline_approach": (
+            "Software SHA-256 with 64 rounds of scalar operations per block. Each round "
+            "requires multiple shifts, adds, and logical operations. ~40 cycles/byte on "
+            "a fast ARM core."
+        ),
+        "optimizations": [
+            {
+                "technique": "SHA256H/SHA256H2/SHA256SU0/SHA256SU1 instruction sequence",
+                "architecture": "AArch64 (ARMv8.0+ with Crypto/SHA2)",
+                "description": (
+                    "Four dedicated instructions implement the SHA-256 algorithm:\n"
+                    "  SHA256H: hash update (rounds) for first half of state\n"
+                    "  SHA256H2: hash update for second half of state\n"
+                    "  SHA256SU0: schedule update part 1\n"
+                    "  SHA256SU1: schedule update part 2\n"
+                    "Together they compute 4 SHA-256 rounds per iteration."
+                ),
+                "code_snippet": (
+                    "// 4 SHA-256 rounds per iteration\n"
+                    "uint32x4_t msg = vld1q_u32(&block[i]);\n"
+                    "uint32x4_t tmp = vaddq_u32(msg, vld1q_u32(&K[i]));\n"
+                    "uint32x4_t state0_saved = state0;\n"
+                    "state0 = vsha256hq_u32(state0, state1, tmp);\n"
+                    "state1 = vsha256h2q_u32(state1, state0_saved, tmp);\n"
+                    "msg0 = vsha256su0q_u32(msg0, msg1);\n"
+                    "msg0 = vsha256su1q_u32(msg0, msg2, msg3);"
+                ),
+                "speedup": "3-5x over software SHA-256; ~8-12 cycles/byte",
+            },
+            {
+                "technique": "Hardware acceleration with multi-block pipelining",
+                "architecture": "AArch64 (ARMv8.0+ with Crypto/SHA2)",
+                "description": (
+                    "For long messages, pipeline the schedule update of the next block "
+                    "with the hash computation of the current block. SHA256SU0/SU1 can "
+                    "execute in parallel with SHA256H/H2 on cores with 2 crypto pipes."
+                ),
+                "code_snippet": (
+                    "// Interleave current block hash with next block schedule\n"
+                    "state0 = vsha256hq_u32(state0, state1, tmp_curr);\n"
+                    "next_msg0 = vsha256su0q_u32(next_msg0, next_msg1);  // parallel\n"
+                    "state1 = vsha256h2q_u32(state1, state0_saved, tmp_curr);\n"
+                    "next_msg0 = vsha256su1q_u32(next_msg0, next_msg2, next_msg3);"
+                ),
+                "speedup": "Additional 20-50% over single-block on dual-pipe cores",
+            },
+        ],
+        "compiler_flags": [
+            "-O2",
+            "-march=armv8-a+sha2",
+            "-march=armv8-a+crypto  (includes SHA2)",
+        ],
+        "target_core_notes": {
+            "cortex-a78": "SHA256H is 4-cycle latency. Schedule and hash overlap well. ~8 cycles/byte.",
+            "neoverse-v2": "2 SHA pipes, SHA256H 2-cycle throughput. ~4 cycles/byte with interleaving.",
+            "cortex-a55": "SHA256H is 4-cycle latency, single pipe. Still 3x faster than software. ~12 cycles/byte.",
+        },
+    },
+    "linked_list_traversal": {
+        "description": (
+            "Traversing a linked list — following pointer chains through memory. This is "
+            "inherently latency-bound due to pointer-chasing. ARM provides prefetch hints "
+            "and pointer authentication to optimize and secure traversals."
+        ),
+        "baseline_approach": (
+            "A simple loop: node = node->next. Each load depends on the previous load's "
+            "result, creating a serial dependency chain. On modern ARM cores with ~4-cycle "
+            "L1 hit latency, this limits throughput to 1 node per 4 cycles."
+        ),
+        "optimizations": [
+            {
+                "technique": "PRFM for prefetch next node",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "Prefetch the next-next node while processing the current node. If the "
+                    "node structure contains a 'next' pointer, issue PRFM on node->next->next "
+                    "to overlap the memory access with computation."
+                ),
+                "code_snippet": (
+                    "while (node) {\n"
+                    "    if (node->next)\n"
+                    "        __builtin_prefetch(node->next->next, 0, 3);\n"
+                    "    process(node);\n"
+                    "    node = node->next;\n"
+                    "}\n"
+                    "// ARM assembly: PRFM PLDL1KEEP, [X0, #NEXT_OFFSET]"
+                ),
+                "speedup": "20-50% if nodes are not in L1 cache; minimal effect if cache-hot",
+            },
+            {
+                "technique": "Pointer authentication for security (PAC)",
+                "architecture": "AArch64 (ARMv8.3+ with PAuth)",
+                "description": (
+                    "Use pointer authentication to protect next pointers from corruption. "
+                    "PACIA/AUTIA sign and verify pointers with minimal overhead (~1 cycle). "
+                    "Prevents pointer-hijacking attacks on linked structures."
+                ),
+                "code_snippet": (
+                    "// Sign pointer when inserting\n"
+                    "node->next = __builtin_arm_pacia(new_next, context);\n"
+                    "// Authenticate pointer when traversing\n"
+                    "struct node *next = __builtin_arm_autia(node->next, context);\n"
+                    "// PACIA X0, X1  /  AUTIA X0, X1"
+                ),
+                "speedup": "Negligible overhead (~1 cycle); significant security improvement",
+            },
+            {
+                "technique": "Avoid branch mispredicts with CBNZ",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "Use CBNZ (Compare and Branch if Not Zero) for the end-of-list check. "
+                    "CBNZ fuses the comparison and branch into a single operation, and the "
+                    "branch predictor can specialize on the pattern (long runs of taken)."
+                ),
+                "code_snippet": (
+                    "loop:\n"
+                    "  LDR  X0, [X0, #NEXT_OFFSET]  // node = node->next\n"
+                    "  // ... process node ...\n"
+                    "  CBNZ X0, loop                 // continue if not null"
+                ),
+                "speedup": "Saves 1 instruction vs CMP+B.NE; better branch prediction hint",
+            },
+        ],
+        "compiler_flags": [
+            "-O2",
+            "-march=armv8.3-a  (for PAC)",
+            "-mbranch-protection=standard  (enables PAC for return addresses)",
+        ],
+        "target_core_notes": {
+            "cortex-a78": "4-cycle L1 load latency, good prefetcher. Software prefetch helps if stride is irregular.",
+            "neoverse-v2": "4-cycle L1 latency, aggressive hardware prefetcher. Software PRFM less needed.",
+            "cortex-a55": "4-cycle L1 latency, limited prefetcher. Software PRFM very beneficial for pointer chasing.",
+        },
+    },
+    "atomic_counter": {
+        "description": (
+            "Atomic read-modify-write operations on shared counters. ARM provides both "
+            "traditional exclusive-access loops (LDXR/STXR) and Large System Extensions (LSE) "
+            "atomics that execute atomically in the cache/interconnect."
+        ),
+        "baseline_approach": (
+            "A LDXR/STXR loop: load-exclusive, modify, store-exclusive, retry if store fails. "
+            "Under contention, the STXR fails frequently, causing retries and wasted work. "
+            "Each retry costs ~10-20 cycles."
+        ),
+        "optimizations": [
+            {
+                "technique": "LDADD (ARMv8.1 LSE atomics)",
+                "architecture": "AArch64 (ARMv8.1+ with LSE)",
+                "description": (
+                    "LDADD performs an atomic load-add in a single instruction. The "
+                    "interconnect/cache handles the read-modify-write atomically, eliminating "
+                    "retry loops. LDADDA/LDADDAL add acquire/release semantics."
+                ),
+                "code_snippet": (
+                    "// C11 atomics — compiler emits LDADD with -march=armv8.1-a\n"
+                    "atomic_fetch_add(&counter, 1);\n"
+                    "\n"
+                    "// Direct intrinsic\n"
+                    "LDADD  W0, W1, [X2]   // W1 = *X2; *X2 += W0 (atomically)\n"
+                    "LDADDAL W0, W1, [X2]  // with acquire-release ordering"
+                ),
+                "speedup": "2-10x under contention vs LDXR/STXR loop; no retry overhead",
+            },
+            {
+                "technique": "CASP for double-width CAS",
+                "architecture": "AArch64 (ARMv8.1+ with LSE)",
+                "description": (
+                    "CASP (Compare-And-Swap Pair) atomically operates on 128 bits (two 64-bit "
+                    "registers). Useful for lock-free data structures that need to update a "
+                    "pointer and a counter atomically."
+                ),
+                "code_snippet": (
+                    "// 128-bit CAS: atomically update {pointer, counter}\n"
+                    "CASPAL X0, X1, X2, X3, [X4]\n"
+                    "// Compares [X4] with {X0,X1}; if equal, stores {X2,X3}"
+                ),
+                "speedup": "Enables lock-free 128-bit updates; replaces LDXP/STXP loops",
+            },
+            {
+                "technique": "SWP (atomic swap)",
+                "architecture": "AArch64 (ARMv8.1+ with LSE)",
+                "description": (
+                    "SWP atomically swaps a register with memory. Useful for spinlock "
+                    "implementations and queue operations where you need to exchange values."
+                ),
+                "code_snippet": (
+                    "// Atomic swap: X0 = old *X1; *X1 = X0\n"
+                    "SWP   X0, X0, [X1]    // relaxed\n"
+                    "SWPAL X0, X0, [X1]    // acquire-release\n"
+                    "\n"
+                    "// Spinlock acquire\n"
+                    "MOV  W0, #1\n"
+                    "SWPA W0, W0, [X1]  // acquire semantics\n"
+                    "CBNZ W0, spin      // retry if was locked"
+                ),
+                "speedup": "Simpler spinlocks; avoids LDXR/STXR retry loop for exchanges",
+            },
+        ],
+        "compiler_flags": [
+            "-O2",
+            "-march=armv8.1-a  (enables LSE atomics)",
+            "-moutline-atomics  (runtime LSE detection on Linux)",
+        ],
+        "target_core_notes": {
+            "cortex-a78": "LSE atomics in cache controller. LDADD is 1 instruction, ~4 cycles uncontended.",
+            "neoverse-v2": "LSE2 support (naturally-aligned atomics). LDADD/SWP near-atomic at L1. CASP for 128-bit.",
+            "cortex-a55": "LSE supported on ARMv8.2 variants. LDADD still cheaper than LDXR/STXR under contention.",
+        },
+    },
+    "simd_reduction": {
+        "description": (
+            "Reducing a SIMD vector to a single scalar value (sum, max, min). AArch64 "
+            "provides efficient across-lane operations that avoid the shuffle-heavy "
+            "reduction patterns needed on other architectures."
+        ),
+        "baseline_approach": (
+            "After SIMD computation, extract each lane and reduce in scalar code. On a "
+            "4-lane FP32 vector, this means 3 scalar FADD instructions in sequence — "
+            "slow and defeating the purpose of SIMD."
+        ),
+        "optimizations": [
+            {
+                "technique": "FADDP pairwise reduction",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "FADDP (Floating-point Add Pairwise) adds adjacent pairs, halving the "
+                    "number of elements each step. Two FADDP instructions reduce a 4-lane "
+                    "FP32 vector to a scalar."
+                ),
+                "code_snippet": (
+                    "float32x4_t v = ...;  // {a, b, c, d}\n"
+                    "float32x2_t p = vadd_f32(vget_high_f32(v), vget_low_f32(v));  // {a+c, b+d}\n"
+                    "float32x2_t s = vpadd_f32(p, p);  // {a+b+c+d, ...}\n"
+                    "float result = vget_lane_f32(s, 0);\n"
+                    "\n"
+                    "// Or use vaddvq_f32 (AArch64 only):\n"
+                    "float result = vaddvq_f32(v);  // single instruction"
+                ),
+                "speedup": "3-4x over scalar extraction and add",
+            },
+            {
+                "technique": "ADDV/FMAXV/FMINV across-lane operations",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "AArch64 provides single-instruction across-lane reductions: ADDV (integer "
+                    "sum), FMAXV (FP max), FMINV (FP min), SMAXV/SMINV (signed max/min), "
+                    "UMAXV/UMINV (unsigned max/min). These are unique to AArch64 — AArch32 "
+                    "NEON does not have them."
+                ),
+                "code_snippet": (
+                    "// Integer sum reduction\n"
+                    "int32x4_t v = ...;\n"
+                    "int32_t sum = vaddvq_s32(v);  // ADDV: sum all 4 lanes\n"
+                    "\n"
+                    "// FP max reduction\n"
+                    "float32x4_t fv = ...;\n"
+                    "float max_val = vmaxvq_f32(fv);  // FMAXV: max of 4 lanes\n"
+                    "\n"
+                    "// Unsigned min reduction\n"
+                    "uint8x16_t bv = ...;\n"
+                    "uint8_t min_byte = vminvq_u8(bv);  // UMINV: min of 16 bytes"
+                ),
+                "speedup": "Single instruction vs 3-4 instruction pairwise tree; lower latency",
+            },
+            {
+                "technique": "Tree reduction for multi-register accumulation",
+                "architecture": "AArch64 (ARMv8.0+)",
+                "description": (
+                    "When using multiple accumulator registers (for latency hiding), combine "
+                    "them in a tree pattern: add pairs of accumulators, then reduce the final "
+                    "vector. This minimizes dependency chains."
+                ),
+                "code_snippet": (
+                    "// 4 accumulators -> 1 scalar\n"
+                    "float32x4_t acc0, acc1, acc2, acc3;\n"
+                    "// ... loop fills all 4 accumulators ...\n"
+                    "float32x4_t sum01 = vaddq_f32(acc0, acc1);\n"
+                    "float32x4_t sum23 = vaddq_f32(acc2, acc3);\n"
+                    "float32x4_t total = vaddq_f32(sum01, sum23);\n"
+                    "float result = vaddvq_f32(total);"
+                ),
+                "speedup": "Reduces 16 FP32 values to scalar in ~6 instructions (log2 tree)",
+            },
+        ],
+        "compiler_flags": [
+            "-O2",
+            "-march=armv8-a",
+            "-ffast-math  (allows FP reassociation for tree reduction)",
+        ],
+        "target_core_notes": {
+            "cortex-a78": "FADDP is 2-cycle latency. ADDV/FMAXV are 3-4 cycles. Use pairwise for lowest latency.",
+            "neoverse-v2": "ADDV is 4 cycles for 128-bit. SVE FADDV provides scalable reduction across any VL.",
+            "cortex-a55": "ADDV is 4 cycles. Single NEON pipe — tree reduction has same latency as sequential.",
+        },
+    },
+}
+
+
+def _format_optimization_overview() -> str:
+    """Return a table of all optimization patterns."""
+    lines = []
+    lines.append("# ARM Code Optimization Patterns")
+    lines.append("")
+    lines.append("| # | Pattern | Description |")
+    lines.append("|---|---------|-------------|")
+    for idx, (name, data) in enumerate(_OPTIMIZATION_PATTERNS.items(), 1):
+        short_desc = data["description"][:80].rstrip()
+        if len(data["description"]) > 80:
+            short_desc += "..."
+        lines.append(f"| {idx} | `{name}` | {short_desc} |")
+    lines.append("")
+    lines.append(f"Total patterns: {len(_OPTIMIZATION_PATTERNS)}")
+    lines.append("")
+    lines.append("Use `suggest_optimization(\"<pattern_name>\")` for detailed optimization guide.")
+    lines.append("Use `suggest_optimization(\"<pattern_name>\", target_core=\"cortex-a78\")` for core-specific advice.")
+    return "\n".join(lines)
+
+
+def _format_optimization(name: str, data: dict, target_core: str | None) -> str:
+    """Format a single optimization pattern into a readable guide."""
+    lines = []
+    title = name.replace("_", " ").title()
+    lines.append(f"# ARM Optimization Guide: {title}")
+    lines.append("")
+
+    # Pattern Description
+    lines.append("## Pattern Description")
+    lines.append(data["description"])
+    lines.append("")
+
+    # Baseline
+    lines.append("## Baseline (Unoptimized)")
+    lines.append(data["baseline_approach"])
+    lines.append("")
+
+    # Optimization Techniques
+    lines.append("## Optimization Techniques")
+    lines.append("")
+    for idx, opt in enumerate(data["optimizations"], 1):
+        lines.append(f"### {idx}. {opt['technique']} ({opt['architecture']})")
+        lines.append(opt["description"])
+        lines.append("")
+        lines.append("```c")
+        lines.append(opt["code_snippet"])
+        lines.append("```")
+        lines.append("")
+        lines.append(f"Expected speedup: {opt['speedup']}")
+        lines.append("")
+
+    # Compiler Flags
+    lines.append("## Recommended Compiler Flags")
+    for flag in data["compiler_flags"]:
+        lines.append(f"- `{flag}`")
+    lines.append("")
+
+    # Core-Specific Notes
+    core_notes = data.get("target_core_notes", {})
+    if core_notes:
+        lines.append("## Core-Specific Notes")
+        lines.append("")
+        if target_core:
+            # Normalize the target core name for lookup
+            core_key = target_core.strip().lower()
+            found = False
+            for core_name, note in core_notes.items():
+                if core_name.lower() == core_key:
+                    display_name = core_name.replace("-", "-").title()
+                    # Ensure proper capitalization like Cortex-A78
+                    display_name = core_name
+                    for prefix in ["cortex-", "neoverse-"]:
+                        if core_name.lower().startswith(prefix):
+                            display_name = prefix.title().rstrip("-") + "-" + core_name[len(prefix):].upper()
+                            break
+                    lines.append(f"### {display_name} (selected)")
+                    lines.append(note)
+                    lines.append("")
+                    found = True
+                    break
+            if not found:
+                lines.append(f"Note: Core '{target_core}' not found in specific notes for this pattern.")
+                lines.append("Showing all available core notes:")
+                lines.append("")
+                for core_name, note in core_notes.items():
+                    lines.append(f"### {core_name}")
+                    lines.append(note)
+                    lines.append("")
+        else:
+            for core_name, note in core_notes.items():
+                lines.append(f"### {core_name}")
+                lines.append(note)
+                lines.append("")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def suggest_optimization(code_pattern: str, target_core: str | None = None) -> str:
+    """Suggest ARM-specific optimizations for a given code pattern.
+
+    Given a common code pattern name, returns detailed ARM optimization suggestions
+    including NEON vectorization, SVE scalable loops, and architecture-specific features.
+
+    Args:
+        code_pattern: The code pattern to optimize. Use "list" or "overview" to see
+            all available patterns. Valid patterns include:
+            "matrix_multiply" -- Dense matrix multiplication with NEON/SVE/SME
+            "memcpy" -- Memory copy with LDP/STP pairs, NEON, DC ZVA, prefetch
+            "memset" -- Memory fill with zero-register pairs, DC ZVA, NEON fill
+            "dot_product" -- Vector dot product with FMLA, SDOT/UDOT, SVE, SME
+            "sort" -- Sorting with NEON compare-and-swap, CSEL, prefetch
+            "string_search" -- String search with NEON compare, CRC32 hash, SVE match
+            "crc32" -- CRC-32 with hardware CRC, PMULL, interleaved pipeline
+            "aes_encrypt" -- AES with AESE+AESMC, parallel blocks, Crypto Extensions
+            "sha256" -- SHA-256 with dedicated SHA instructions
+            "linked_list_traversal" -- Pointer chasing with prefetch, PAC, CBNZ
+            "atomic_counter" -- Atomics with LSE (LDADD, CASP, SWP)
+            "simd_reduction" -- SIMD reduction with FADDP, ADDV/FMAXV, tree reduction
+        target_core: Optional ARM core name (e.g. "cortex-a78", "neoverse-v2",
+            "cortex-a55"). If provided, highlights core-specific optimization notes.
+    """
+    key = code_pattern.strip().lower()
+
+    if key in ("list", "overview"):
+        return _format_optimization_overview()
+
+    if key not in _OPTIMIZATION_PATTERNS:
+        valid = ", ".join(sorted(_OPTIMIZATION_PATTERNS.keys()))
+        return (
+            f"Error: '{code_pattern}' is not a recognized optimization pattern.\n\n"
+            f"Valid patterns: {valid}\n\n"
+            f"Use suggest_optimization(\"list\") for an overview of all patterns."
+        )
+
+    return _format_optimization(key, _OPTIMIZATION_PATTERNS[key], target_core)
+
+# ---------------------------------------------------------------------------
+# Tool 18: lookup_system_register — AArch64 system register reference
+# ---------------------------------------------------------------------------
+
+_SYSTEM_REGISTERS: dict[str, dict] = {
+    # ── Memory Management ──────────────────────────────────────────────────
+    "SCTLR_EL1": {
+        "full_name": "System Control Register",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_0_C1_C0_0",
+        "width": 64,
+        "category": "memory_management",
+        "description": (
+            "Controls architectural features including MMU enable, data/instruction "
+            "caches, alignment checking, endianness, and various memory-system behaviours "
+            "at EL1/EL0."
+        ),
+        "key_fields": [
+            {"bits": "[0]", "name": "M", "description": "MMU enable. 0=disabled, 1=enabled."},
+            {"bits": "[2]", "name": "C", "description": "Data cache enable."},
+            {"bits": "[12]", "name": "I", "description": "Instruction cache enable."},
+            {"bits": "[1]", "name": "A", "description": "Alignment check enable."},
+            {"bits": "[25]", "name": "EE", "description": "Exception endianness. 0=little-endian, 1=big-endian."},
+        ],
+        "usage_example": "MRS X0, SCTLR_EL1    // Read system control register\nMSR SCTLR_EL1, X0    // Write system control register",
+    },
+    "SCTLR_EL2": {
+        "full_name": "System Control Register",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_4_C1_C0_0",
+        "width": 64,
+        "category": "memory_management",
+        "description": "Controls architectural features at EL2 (hypervisor). Same layout as SCTLR_EL1 but governs EL2 behaviour.",
+        "key_fields": [
+            {"bits": "[0]", "name": "M", "description": "MMU enable for EL2."},
+            {"bits": "[2]", "name": "C", "description": "Data cache enable for EL2."},
+        ],
+        "usage_example": "MRS X0, SCTLR_EL2\nMSR SCTLR_EL2, X0",
+    },
+    "SCTLR_EL3": {
+        "full_name": "System Control Register",
+        "el": "EL3",
+        "access": "RW",
+        "encoding": "S3_6_C1_C0_0",
+        "width": 64,
+        "category": "memory_management",
+        "description": "Controls architectural features at EL3 (secure monitor).",
+        "key_fields": [
+            {"bits": "[0]", "name": "M", "description": "MMU enable for EL3."},
+            {"bits": "[2]", "name": "C", "description": "Data cache enable for EL3."},
+        ],
+        "usage_example": "MRS X0, SCTLR_EL3\nMSR SCTLR_EL3, X0",
+    },
+    "TCR_EL1": {
+        "full_name": "Translation Control Register",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_0_C2_C0_2",
+        "width": 64,
+        "category": "memory_management",
+        "description": (
+            "Controls translation table walks for EL0/EL1 address translation. "
+            "Configures granule size, region sizes (T0SZ/T1SZ), cacheability and "
+            "shareability of page-table walks, and intermediate physical address size."
+        ),
+        "key_fields": [
+            {"bits": "[5:0]", "name": "T0SZ", "description": "Size offset for TTBR0_EL1 region (2^(64-T0SZ) VA range)."},
+            {"bits": "[21:16]", "name": "T1SZ", "description": "Size offset for TTBR1_EL1 region."},
+            {"bits": "[15:14]", "name": "TG0", "description": "Granule size for TTBR0 (00=4KB, 01=64KB, 10=16KB)."},
+            {"bits": "[31:30]", "name": "TG1", "description": "Granule size for TTBR1 (01=16KB, 10=4KB, 11=64KB)."},
+            {"bits": "[34:32]", "name": "IPS", "description": "Intermediate Physical Address Size (000=32b, 101=48b, 110=52b)."},
+        ],
+        "usage_example": "MRS X0, TCR_EL1\nMSR TCR_EL1, X0",
+    },
+    "TCR_EL2": {
+        "full_name": "Translation Control Register",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_4_C2_C0_2",
+        "width": 64,
+        "category": "memory_management",
+        "description": "Controls translation table walks for EL2 address translation.",
+        "key_fields": [
+            {"bits": "[5:0]", "name": "T0SZ", "description": "Size offset for TTBR0_EL2 region."},
+            {"bits": "[15:14]", "name": "TG0", "description": "Granule size for TTBR0_EL2."},
+        ],
+        "usage_example": "MRS X0, TCR_EL2\nMSR TCR_EL2, X0",
+    },
+    "TTBR0_EL1": {
+        "full_name": "Translation Table Base Register 0",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_0_C2_C0_0",
+        "width": 64,
+        "category": "memory_management",
+        "description": "Holds the base address of the translation table for the lower VA range (typically user space).",
+        "key_fields": [
+            {"bits": "[47:1]", "name": "BADDR", "description": "Translation table base address."},
+            {"bits": "[63:48]", "name": "ASID", "description": "Address Space Identifier (when TCR_EL1.A1=0)."},
+        ],
+        "usage_example": "MRS X0, TTBR0_EL1\nMSR TTBR0_EL1, X0",
+    },
+    "TTBR1_EL1": {
+        "full_name": "Translation Table Base Register 1",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_0_C2_C0_1",
+        "width": 64,
+        "category": "memory_management",
+        "description": "Holds the base address of the translation table for the upper VA range (typically kernel space).",
+        "key_fields": [
+            {"bits": "[47:1]", "name": "BADDR", "description": "Translation table base address."},
+            {"bits": "[63:48]", "name": "ASID", "description": "Address Space Identifier (when TCR_EL1.A1=1)."},
+        ],
+        "usage_example": "MRS X0, TTBR1_EL1\nMSR TTBR1_EL1, X0",
+    },
+    "TTBR0_EL2": {
+        "full_name": "Translation Table Base Register 0",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_4_C2_C0_0",
+        "width": 64,
+        "category": "memory_management",
+        "description": "Holds the base address of the translation table for EL2.",
+        "key_fields": [
+            {"bits": "[47:1]", "name": "BADDR", "description": "Translation table base address."},
+        ],
+        "usage_example": "MRS X0, TTBR0_EL2\nMSR TTBR0_EL2, X0",
+    },
+    "MAIR_EL1": {
+        "full_name": "Memory Attribute Indirection Register",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_0_C10_C2_0",
+        "width": 64,
+        "category": "memory_management",
+        "description": "Defines memory attribute encodings (Device, Normal, Cacheable) referenced by page table AttrIndx field.",
+        "key_fields": [
+            {"bits": "[7:0]", "name": "Attr0", "description": "Memory attributes for AttrIndx=0."},
+            {"bits": "[15:8]", "name": "Attr1", "description": "Memory attributes for AttrIndx=1."},
+        ],
+        "usage_example": "MRS X0, MAIR_EL1\nMSR MAIR_EL1, X0",
+    },
+    "MAIR_EL2": {
+        "full_name": "Memory Attribute Indirection Register",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_4_C10_C2_0",
+        "width": 64,
+        "category": "memory_management",
+        "description": "Defines memory attribute encodings for EL2 stage 1 translations.",
+        "key_fields": [
+            {"bits": "[7:0]", "name": "Attr0", "description": "Memory attributes for AttrIndx=0."},
+        ],
+        "usage_example": "MRS X0, MAIR_EL2\nMSR MAIR_EL2, X0",
+    },
+    "ESR_EL1": {
+        "full_name": "Exception Syndrome Register",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_0_C5_C2_0",
+        "width": 64,
+        "category": "memory_management",
+        "description": "Holds syndrome information for an exception taken to EL1, including the exception class and instruction-specific syndrome.",
+        "key_fields": [
+            {"bits": "[31:26]", "name": "EC", "description": "Exception Class. Indicates reason for exception (e.g. 0x15=SVC, 0x20=Inst Abort lower, 0x24=Data Abort lower)."},
+            {"bits": "[25]", "name": "IL", "description": "Instruction Length. 0=16-bit, 1=32-bit."},
+            {"bits": "[24:0]", "name": "ISS", "description": "Instruction Specific Syndrome. Encoding depends on EC value."},
+            {"bits": "[24]", "name": "ISV", "description": "Instruction Syndrome Valid (for data aborts). When 1, ISS[23:14] hold access details."},
+            {"bits": "[5:0]", "name": "DFSC/IFSC", "description": "Data/Instruction Fault Status Code (within ISS). Indicates fault type (translation, access flag, permission)."},
+        ],
+        "usage_example": "MRS X0, ESR_EL1    // Read exception syndrome after taking exception",
+    },
+    "ESR_EL2": {
+        "full_name": "Exception Syndrome Register",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_4_C5_C2_0",
+        "width": 64,
+        "category": "memory_management",
+        "description": "Holds syndrome information for an exception taken to EL2.",
+        "key_fields": [
+            {"bits": "[31:26]", "name": "EC", "description": "Exception Class."},
+            {"bits": "[24:0]", "name": "ISS", "description": "Instruction Specific Syndrome."},
+        ],
+        "usage_example": "MRS X0, ESR_EL2",
+    },
+    "ESR_EL3": {
+        "full_name": "Exception Syndrome Register",
+        "el": "EL3",
+        "access": "RW",
+        "encoding": "S3_6_C5_C2_0",
+        "width": 64,
+        "category": "memory_management",
+        "description": "Holds syndrome information for an exception taken to EL3.",
+        "key_fields": [
+            {"bits": "[31:26]", "name": "EC", "description": "Exception Class."},
+            {"bits": "[24:0]", "name": "ISS", "description": "Instruction Specific Syndrome."},
+        ],
+        "usage_example": "MRS X0, ESR_EL3",
+    },
+    "FAR_EL1": {
+        "full_name": "Fault Address Register",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_0_C6_C0_0",
+        "width": 64,
+        "category": "memory_management",
+        "description": "Holds the faulting virtual address for synchronous instruction/data aborts taken to EL1.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "VA", "description": "Faulting virtual address."},
+        ],
+        "usage_example": "MRS X0, FAR_EL1    // Read faulting address after data/instruction abort",
+    },
+    "FAR_EL2": {
+        "full_name": "Fault Address Register",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_4_C6_C0_0",
+        "width": 64,
+        "category": "memory_management",
+        "description": "Holds the faulting virtual address for synchronous aborts taken to EL2.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "VA", "description": "Faulting virtual address."},
+        ],
+        "usage_example": "MRS X0, FAR_EL2",
+    },
+    # ── Exception Handling ─────────────────────────────────────────────────
+    "VBAR_EL1": {
+        "full_name": "Vector Base Address Register",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_0_C12_C0_0",
+        "width": 64,
+        "category": "exception",
+        "description": "Holds the exception vector base address for EL1. Vectors are at offsets 0x000-0x780 from this address.",
+        "key_fields": [
+            {"bits": "[63:11]", "name": "VBA", "description": "Vector base address. Bits [10:0] are RES0 (2KB aligned)."},
+        ],
+        "usage_example": "LDR X0, =vectors\nMSR VBAR_EL1, X0    // Set exception vector table",
+    },
+    "VBAR_EL2": {
+        "full_name": "Vector Base Address Register",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_4_C12_C0_0",
+        "width": 64,
+        "category": "exception",
+        "description": "Holds the exception vector base address for EL2.",
+        "key_fields": [
+            {"bits": "[63:11]", "name": "VBA", "description": "Vector base address (2KB aligned)."},
+        ],
+        "usage_example": "MSR VBAR_EL2, X0",
+    },
+    "VBAR_EL3": {
+        "full_name": "Vector Base Address Register",
+        "el": "EL3",
+        "access": "RW",
+        "encoding": "S3_6_C12_C0_0",
+        "width": 64,
+        "category": "exception",
+        "description": "Holds the exception vector base address for EL3.",
+        "key_fields": [
+            {"bits": "[63:11]", "name": "VBA", "description": "Vector base address (2KB aligned)."},
+        ],
+        "usage_example": "MSR VBAR_EL3, X0",
+    },
+    "ELR_EL1": {
+        "full_name": "Exception Link Register",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_0_C4_C0_1",
+        "width": 64,
+        "category": "exception",
+        "description": "Holds the return address for an exception taken to EL1. ERET uses this as the target PC.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "ReturnAddress", "description": "Exception return address."},
+        ],
+        "usage_example": "MRS X0, ELR_EL1\nMSR ELR_EL1, X0",
+    },
+    "ELR_EL2": {
+        "full_name": "Exception Link Register",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_4_C4_C0_1",
+        "width": 64,
+        "category": "exception",
+        "description": "Holds the return address for an exception taken to EL2.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "ReturnAddress", "description": "Exception return address."},
+        ],
+        "usage_example": "MRS X0, ELR_EL2\nMSR ELR_EL2, X0",
+    },
+    "ELR_EL3": {
+        "full_name": "Exception Link Register",
+        "el": "EL3",
+        "access": "RW",
+        "encoding": "S3_6_C4_C0_1",
+        "width": 64,
+        "category": "exception",
+        "description": "Holds the return address for an exception taken to EL3.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "ReturnAddress", "description": "Exception return address."},
+        ],
+        "usage_example": "MRS X0, ELR_EL3\nMSR ELR_EL3, X0",
+    },
+    "SPSR_EL1": {
+        "full_name": "Saved Program Status Register",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_0_C4_C0_0",
+        "width": 64,
+        "category": "exception",
+        "description": "Holds the saved PSTATE when an exception is taken to EL1. Restored on ERET.",
+        "key_fields": [
+            {"bits": "[3:0]", "name": "M", "description": "Mode field. AArch64 EL and SP selection."},
+            {"bits": "[9]", "name": "D", "description": "Debug exception mask."},
+            {"bits": "[8]", "name": "A", "description": "SError interrupt mask."},
+            {"bits": "[7]", "name": "I", "description": "IRQ mask."},
+            {"bits": "[6]", "name": "F", "description": "FIQ mask."},
+        ],
+        "usage_example": "MRS X0, SPSR_EL1\nMSR SPSR_EL1, X0",
+    },
+    "SPSR_EL2": {
+        "full_name": "Saved Program Status Register",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_4_C4_C0_0",
+        "width": 64,
+        "category": "exception",
+        "description": "Holds the saved PSTATE when an exception is taken to EL2.",
+        "key_fields": [
+            {"bits": "[3:0]", "name": "M", "description": "Mode field."},
+            {"bits": "[7:6]", "name": "I,F", "description": "IRQ and FIQ masks."},
+        ],
+        "usage_example": "MRS X0, SPSR_EL2\nMSR SPSR_EL2, X0",
+    },
+    "SPSR_EL3": {
+        "full_name": "Saved Program Status Register",
+        "el": "EL3",
+        "access": "RW",
+        "encoding": "S3_6_C4_C0_0",
+        "width": 64,
+        "category": "exception",
+        "description": "Holds the saved PSTATE when an exception is taken to EL3.",
+        "key_fields": [
+            {"bits": "[3:0]", "name": "M", "description": "Mode field."},
+            {"bits": "[7:6]", "name": "I,F", "description": "IRQ and FIQ masks."},
+        ],
+        "usage_example": "MRS X0, SPSR_EL3\nMSR SPSR_EL3, X0",
+    },
+    "SP_EL0": {
+        "full_name": "Stack Pointer (EL0)",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_0_C4_C1_0",
+        "width": 64,
+        "category": "exception",
+        "description": "The stack pointer used when SPSel selects SP_EL0 (shared user-space stack pointer).",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "SP", "description": "Stack pointer value."},
+        ],
+        "usage_example": "MRS X0, SP_EL0\nMSR SP_EL0, X0",
+    },
+    "SP_EL1": {
+        "full_name": "Stack Pointer (EL1)",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_4_C4_C1_0",
+        "width": 64,
+        "category": "exception",
+        "description": "Dedicated stack pointer for EL1.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "SP", "description": "Stack pointer value."},
+        ],
+        "usage_example": "MRS X0, SP_EL1\nMSR SP_EL1, X0",
+    },
+    "SP_EL2": {
+        "full_name": "Stack Pointer (EL2)",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_6_C4_C1_0",
+        "width": 64,
+        "category": "exception",
+        "description": "Dedicated stack pointer for EL2.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "SP", "description": "Stack pointer value."},
+        ],
+        "usage_example": "MRS X0, SP_EL2\nMSR SP_EL2, X0",
+    },
+    # ── ID Registers (read-only) ──────────────────────────────────────────
+    "ID_AA64PFR0_EL1": {
+        "full_name": "AArch64 Processor Feature Register 0",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C4_0",
+        "width": 64,
+        "category": "id",
+        "description": "Provides information about implemented PE features including exception level support, floating-point, and advanced SIMD.",
+        "key_fields": [
+            {"bits": "[3:0]", "name": "EL0", "description": "EL0 handling. 0x1=AArch64 only, 0x2=AArch64+AArch32."},
+            {"bits": "[7:4]", "name": "EL1", "description": "EL1 handling."},
+            {"bits": "[11:8]", "name": "EL2", "description": "EL2 handling."},
+            {"bits": "[15:12]", "name": "EL3", "description": "EL3 handling."},
+            {"bits": "[19:16]", "name": "FP", "description": "Floating-point support. 0x0=implemented, 0xF=not implemented."},
+        ],
+        "usage_example": "MRS X0, ID_AA64PFR0_EL1    // Read-only ID register",
+    },
+    "ID_AA64PFR1_EL1": {
+        "full_name": "AArch64 Processor Feature Register 1",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C4_1",
+        "width": 64,
+        "category": "id",
+        "description": "Provides additional PE feature information including Branch Target Identification (BTI), Speculative Store Bypass Safe (SSBS), and MTE.",
+        "key_fields": [
+            {"bits": "[3:0]", "name": "BT", "description": "Branch Target Identification. 0x0=not impl, 0x1=impl."},
+            {"bits": "[7:4]", "name": "SSBS", "description": "Speculative Store Bypass Safe."},
+            {"bits": "[11:8]", "name": "MTE", "description": "Memory Tagging Extension support."},
+        ],
+        "usage_example": "MRS X0, ID_AA64PFR1_EL1",
+    },
+    "ID_AA64ISAR0_EL1": {
+        "full_name": "AArch64 Instruction Set Attribute Register 0",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C6_0",
+        "width": 64,
+        "category": "id",
+        "description": "Indicates support for cryptographic, CRC32, atomic, and other instruction set features.",
+        "key_fields": [
+            {"bits": "[7:4]", "name": "AES", "description": "AES instruction support."},
+            {"bits": "[15:12]", "name": "SHA1", "description": "SHA1 instruction support."},
+            {"bits": "[23:20]", "name": "Atomic", "description": "Atomic instruction support (LSE). 0x2=implemented."},
+        ],
+        "usage_example": "MRS X0, ID_AA64ISAR0_EL1",
+    },
+    "ID_AA64ISAR1_EL1": {
+        "full_name": "AArch64 Instruction Set Attribute Register 1",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C6_1",
+        "width": 64,
+        "category": "id",
+        "description": "Indicates support for additional instruction set features including DPB, JSCVT, FCMA, LRCPC, and PAC.",
+        "key_fields": [
+            {"bits": "[3:0]", "name": "DPB", "description": "Data Persistence (DC CVAP) support."},
+            {"bits": "[11:8]", "name": "LRCPC", "description": "Load-Acquire RCpc instructions."},
+        ],
+        "usage_example": "MRS X0, ID_AA64ISAR1_EL1",
+    },
+    "ID_AA64ISAR2_EL1": {
+        "full_name": "AArch64 Instruction Set Attribute Register 2",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C6_2",
+        "width": 64,
+        "category": "id",
+        "description": "Indicates support for further instruction set extensions introduced in ARMv8.7+.",
+        "key_fields": [
+            {"bits": "[3:0]", "name": "WFxT", "description": "WFE/WFI with timeout support."},
+        ],
+        "usage_example": "MRS X0, ID_AA64ISAR2_EL1",
+    },
+    "ID_AA64MMFR0_EL1": {
+        "full_name": "AArch64 Memory Model Feature Register 0",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C7_0",
+        "width": 64,
+        "category": "id",
+        "description": "Provides information about the implemented memory model and memory management features including PA size and granule support.",
+        "key_fields": [
+            {"bits": "[3:0]", "name": "PARange", "description": "Physical Address range. 0x0=32b, 0x5=48b, 0x6=52b."},
+            {"bits": "[31:28]", "name": "TGran4", "description": "4KB granule support. 0x0=supported."},
+            {"bits": "[27:24]", "name": "TGran64", "description": "64KB granule support."},
+            {"bits": "[23:20]", "name": "TGran16", "description": "16KB granule support."},
+        ],
+        "usage_example": "MRS X0, ID_AA64MMFR0_EL1",
+    },
+    "ID_AA64MMFR1_EL1": {
+        "full_name": "AArch64 Memory Model Feature Register 1",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C7_1",
+        "width": 64,
+        "category": "id",
+        "description": "Provides additional memory model feature information including HPDS, VH, PAN, and LO support.",
+        "key_fields": [
+            {"bits": "[3:0]", "name": "HAFDBS", "description": "Hardware updates to Access/Dirty flags."},
+            {"bits": "[11:8]", "name": "VH", "description": "Virtualization Host Extensions."},
+        ],
+        "usage_example": "MRS X0, ID_AA64MMFR1_EL1",
+    },
+    "ID_AA64MMFR2_EL1": {
+        "full_name": "AArch64 Memory Model Feature Register 2",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C7_2",
+        "width": 64,
+        "category": "id",
+        "description": "Provides further memory model feature information including CNP, UAO, IESB, and VARANGE.",
+        "key_fields": [
+            {"bits": "[3:0]", "name": "CnP", "description": "Common not Private translations."},
+            {"bits": "[19:16]", "name": "VARANGE", "description": "VA Range. 0x1=52-bit VA supported."},
+        ],
+        "usage_example": "MRS X0, ID_AA64MMFR2_EL1",
+    },
+    "ID_AA64DFR0_EL1": {
+        "full_name": "AArch64 Debug Feature Register 0",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C5_0",
+        "width": 64,
+        "category": "id",
+        "description": "Provides top-level information about the debug system including number of breakpoints and watchpoints.",
+        "key_fields": [
+            {"bits": "[3:0]", "name": "DebugVer", "description": "Debug architecture version."},
+            {"bits": "[15:12]", "name": "BRPs", "description": "Number of breakpoints minus 1."},
+            {"bits": "[23:20]", "name": "WRPs", "description": "Number of watchpoints minus 1."},
+        ],
+        "usage_example": "MRS X0, ID_AA64DFR0_EL1",
+    },
+    "ID_AA64SMFR0_EL1": {
+        "full_name": "SME Feature ID Register 0",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C4_5",
+        "width": 64,
+        "category": "id",
+        "description": "Provides information about the implemented Scalable Matrix Extension (SME) features.",
+        "key_fields": [
+            {"bits": "[63]", "name": "FA64", "description": "Full A64 instruction set in Streaming SVE mode."},
+            {"bits": "[55:52]", "name": "I16I64", "description": "16-bit integer outer product to 64-bit."},
+        ],
+        "usage_example": "MRS X0, ID_AA64SMFR0_EL1",
+    },
+    "ID_AA64ZFR0_EL1": {
+        "full_name": "SVE Feature ID Register 0",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C4_4",
+        "width": 64,
+        "category": "id",
+        "description": "Provides information about the implemented Scalable Vector Extension (SVE) features.",
+        "key_fields": [
+            {"bits": "[3:0]", "name": "SVEver", "description": "SVE version. 0x0=SVE, 0x1=SVE2."},
+            {"bits": "[7:4]", "name": "AES", "description": "SVE AES instructions."},
+        ],
+        "usage_example": "MRS X0, ID_AA64ZFR0_EL1",
+    },
+    "MIDR_EL1": {
+        "full_name": "Main ID Register",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C0_0",
+        "width": 64,
+        "category": "id",
+        "description": "Identifies the PE implementation: implementer, architecture, variant, part number, and revision.",
+        "key_fields": [
+            {"bits": "[31:24]", "name": "Implementer", "description": "Implementer code. 0x41=Arm, 0x51=Qualcomm, 0x43=Cavium."},
+            {"bits": "[23:20]", "name": "Variant", "description": "Major revision (variant) number."},
+            {"bits": "[19:16]", "name": "Architecture", "description": "Architecture code. 0xF=defined by ID registers."},
+            {"bits": "[15:4]", "name": "PartNum", "description": "Primary part number. Identifies core type."},
+            {"bits": "[3:0]", "name": "Revision", "description": "Minor revision (patch) number."},
+        ],
+        "usage_example": "MRS X0, MIDR_EL1    // Identify the processor",
+    },
+    "MPIDR_EL1": {
+        "full_name": "Multiprocessor Affinity Register",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C0_5",
+        "width": 64,
+        "category": "id",
+        "description": "Provides an additional PE identification mechanism for scheduling purposes in multiprocessor systems.",
+        "key_fields": [
+            {"bits": "[7:0]", "name": "Aff0", "description": "Affinity level 0 (typically core ID)."},
+            {"bits": "[15:8]", "name": "Aff1", "description": "Affinity level 1 (typically cluster ID)."},
+            {"bits": "[23:16]", "name": "Aff2", "description": "Affinity level 2."},
+            {"bits": "[39:32]", "name": "Aff3", "description": "Affinity level 3."},
+            {"bits": "[30]", "name": "U", "description": "Uniprocessor. 0=part of multiprocessor, 1=uniprocessor."},
+        ],
+        "usage_example": "MRS X0, MPIDR_EL1    // Read CPU affinity",
+    },
+    "REVIDR_EL1": {
+        "full_name": "Revision ID Register",
+        "el": "EL1",
+        "access": "RO",
+        "encoding": "S3_0_C0_C0_6",
+        "width": 64,
+        "category": "id",
+        "description": "Provides implementation-specific revision information that supplements MIDR_EL1.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "IMPLEMENTATION DEFINED", "description": "Implementation-specific revision information."},
+        ],
+        "usage_example": "MRS X0, REVIDR_EL1",
+    },
+    # ── Performance / Debug ───────────────────────────────────────────────
+    "PMCR_EL0": {
+        "full_name": "Performance Monitors Control Register",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C9_C12_0",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Controls the performance monitor counters, including enable, reset, clock divider, and export.",
+        "key_fields": [
+            {"bits": "[0]", "name": "E", "description": "Enable. All counters are enabled when set."},
+            {"bits": "[1]", "name": "P", "description": "Event counter reset. Resets all event counters to zero."},
+            {"bits": "[2]", "name": "C", "description": "Cycle counter reset. Resets PMCCNTR_EL0."},
+            {"bits": "[3]", "name": "D", "description": "Clock divider. 0=every cycle, 1=every 64th cycle."},
+            {"bits": "[15:11]", "name": "N", "description": "Number of event counters implemented (read-only)."},
+        ],
+        "usage_example": "MRS X0, PMCR_EL0\nORR X0, X0, #1      // Enable\nMSR PMCR_EL0, X0",
+    },
+    "PMCNTENSET_EL0": {
+        "full_name": "Performance Monitors Count Enable Set Register",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C9_C12_1",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Enables individual event counters and the cycle counter. Write 1 to enable; reads return current enable state.",
+        "key_fields": [
+            {"bits": "[31]", "name": "C", "description": "Cycle counter enable."},
+            {"bits": "[30:0]", "name": "P", "description": "Event counter enable bits (one per counter)."},
+        ],
+        "usage_example": "MOV X0, #(1 << 31)   // Enable cycle counter\nMSR PMCNTENSET_EL0, X0",
+    },
+    "PMCCNTR_EL0": {
+        "full_name": "Performance Monitors Cycle Count Register",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C9_C13_0",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Counts processor cycles. Controlled by PMCR_EL0.E and PMCNTENSET_EL0.C.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "CCNT", "description": "Cycle count value."},
+        ],
+        "usage_example": "MRS X0, PMCCNTR_EL0    // Read cycle counter",
+    },
+    "PMEVCNTR0_EL0": {
+        "full_name": "Performance Monitors Event Count Register 0",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C14_C8_0",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Event counter 0. Counts events selected by PMEVTYPER0_EL0.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "EVCNT", "description": "Event count value."},
+        ],
+        "usage_example": "MRS X0, PMEVCNTR0_EL0",
+    },
+    "PMEVCNTR1_EL0": {
+        "full_name": "Performance Monitors Event Count Register 1",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C14_C8_1",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Event counter 1.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "EVCNT", "description": "Event count value."},
+        ],
+        "usage_example": "MRS X0, PMEVCNTR1_EL0",
+    },
+    "PMEVCNTR2_EL0": {
+        "full_name": "Performance Monitors Event Count Register 2",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C14_C8_2",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Event counter 2.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "EVCNT", "description": "Event count value."},
+        ],
+        "usage_example": "MRS X0, PMEVCNTR2_EL0",
+    },
+    "PMEVCNTR3_EL0": {
+        "full_name": "Performance Monitors Event Count Register 3",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C14_C8_3",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Event counter 3.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "EVCNT", "description": "Event count value."},
+        ],
+        "usage_example": "MRS X0, PMEVCNTR3_EL0",
+    },
+    "PMEVCNTR4_EL0": {
+        "full_name": "Performance Monitors Event Count Register 4",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C14_C8_4",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Event counter 4.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "EVCNT", "description": "Event count value."},
+        ],
+        "usage_example": "MRS X0, PMEVCNTR4_EL0",
+    },
+    "PMEVCNTR5_EL0": {
+        "full_name": "Performance Monitors Event Count Register 5",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C14_C8_5",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Event counter 5.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "EVCNT", "description": "Event count value."},
+        ],
+        "usage_example": "MRS X0, PMEVCNTR5_EL0",
+    },
+    "PMSELR_EL0": {
+        "full_name": "Performance Monitors Event Counter Selection Register",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C9_C12_5",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Selects the current event counter for access via PMXEVCNTR_EL0 and PMXEVTYPER_EL0.",
+        "key_fields": [
+            {"bits": "[4:0]", "name": "SEL", "description": "Counter select. Selects which event counter is accessed."},
+        ],
+        "usage_example": "MOV X0, #0\nMSR PMSELR_EL0, X0    // Select counter 0",
+    },
+    "PMEVTYPER0_EL0": {
+        "full_name": "Performance Monitors Event Type Selection Register 0",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C14_C12_0",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Selects which event is counted by PMEVCNTR0_EL0 and filters by EL.",
+        "key_fields": [
+            {"bits": "[15:0]", "name": "evtCount", "description": "Event number to count (architecture-defined or IMPLEMENTATION DEFINED)."},
+            {"bits": "[26]", "name": "U", "description": "EL0 filtering. 1=don't count at EL0."},
+            {"bits": "[27]", "name": "NSK", "description": "Non-secure EL1 filtering."},
+        ],
+        "usage_example": "MOV X0, #0x11    // CPU_CYCLES event\nMSR PMEVTYPER0_EL0, X0",
+    },
+    "MDSCR_EL1": {
+        "full_name": "Monitor Debug System Control Register",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_0_C0_C2_2",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Main debug control register. Enables software debug events, single-step, and breakpoint/watchpoint control.",
+        "key_fields": [
+            {"bits": "[0]", "name": "SS", "description": "Software step. When 1, enables single-step exceptions."},
+            {"bits": "[13]", "name": "MDE", "description": "Monitor debug events enable."},
+            {"bits": "[15]", "name": "KDE", "description": "Kernel debug events enable (EL1)."},
+        ],
+        "usage_example": "MRS X0, MDSCR_EL1\nORR X0, X0, #(1 << 13)   // Enable debug events\nMSR MDSCR_EL1, X0",
+    },
+    "DBGBVR0_EL1": {
+        "full_name": "Debug Breakpoint Value Register 0",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S2_0_C0_C0_4",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Holds the address or address range for hardware breakpoint 0 (first of up to 16).",
+        "key_fields": [
+            {"bits": "[63:2]", "name": "VA", "description": "Virtual address for breakpoint match."},
+        ],
+        "usage_example": "MSR DBGBVR0_EL1, X0    // Set breakpoint 0 address",
+    },
+    "DBGWVR0_EL1": {
+        "full_name": "Debug Watchpoint Value Register 0",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S2_0_C0_C0_6",
+        "width": 64,
+        "category": "perf_debug",
+        "description": "Holds the address or address range for hardware watchpoint 0.",
+        "key_fields": [
+            {"bits": "[63:2]", "name": "VA", "description": "Virtual address for watchpoint match."},
+        ],
+        "usage_example": "MSR DBGWVR0_EL1, X0    // Set watchpoint 0 address",
+    },
+    # ── Timer ─────────────────────────────────────────────────────────────
+    "CNTPCT_EL0": {
+        "full_name": "Counter-timer Physical Count",
+        "el": "EL0",
+        "access": "RO",
+        "encoding": "S3_3_C14_C0_1",
+        "width": 64,
+        "category": "timer",
+        "description": "Holds the 64-bit physical count value from the system counter (no virtual offset applied).",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "PhysicalCount", "description": "Current physical count value."},
+        ],
+        "usage_example": "MRS X0, CNTPCT_EL0    // Read physical timer count",
+    },
+    "CNTVCT_EL0": {
+        "full_name": "Counter-timer Virtual Count",
+        "el": "EL0",
+        "access": "RO",
+        "encoding": "S3_3_C14_C0_2",
+        "width": 64,
+        "category": "timer",
+        "description": "Holds the 64-bit virtual count value (physical count minus CNTVOFF_EL2 offset).",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "VirtualCount", "description": "Current virtual count value."},
+        ],
+        "usage_example": "MRS X0, CNTVCT_EL0    // Read virtual timer count",
+    },
+    "CNTP_TVAL_EL0": {
+        "full_name": "Counter-timer Physical Timer TimerValue Register",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C14_C2_0",
+        "width": 64,
+        "category": "timer",
+        "description": "Holds the timer value for the EL1 physical timer. Counts down from the written value.",
+        "key_fields": [
+            {"bits": "[31:0]", "name": "TimerValue", "description": "Timer value (signed 32-bit). Timer fires when reaches 0 or negative."},
+        ],
+        "usage_example": "MOV X0, #1000000\nMSR CNTP_TVAL_EL0, X0    // Set timer for 1M ticks",
+    },
+    "CNTP_CTL_EL0": {
+        "full_name": "Counter-timer Physical Timer Control Register",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C14_C2_1",
+        "width": 64,
+        "category": "timer",
+        "description": "Controls the EL1 physical timer: enable, output mask, and status.",
+        "key_fields": [
+            {"bits": "[0]", "name": "ENABLE", "description": "Timer enable. 1=enabled."},
+            {"bits": "[1]", "name": "IMASK", "description": "Interrupt mask. 0=not masked, 1=masked."},
+            {"bits": "[2]", "name": "ISTATUS", "description": "Timer condition met (read-only)."},
+        ],
+        "usage_example": "MOV X0, #1\nMSR CNTP_CTL_EL0, X0    // Enable physical timer",
+    },
+    "CNTFRQ_EL0": {
+        "full_name": "Counter-timer Frequency Register",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C14_C0_0",
+        "width": 64,
+        "category": "timer",
+        "description": "Holds the clock frequency of the system counter in Hz. Typically written by firmware at boot.",
+        "key_fields": [
+            {"bits": "[31:0]", "name": "Freq", "description": "Clock frequency in Hz (commonly 100MHz or 19.2MHz)."},
+        ],
+        "usage_example": "MRS X0, CNTFRQ_EL0    // Read timer frequency",
+    },
+    # ── Security / Virtualization ─────────────────────────────────────────
+    "SCR_EL3": {
+        "full_name": "Secure Configuration Register",
+        "el": "EL3",
+        "access": "RW",
+        "encoding": "S3_6_C1_C1_0",
+        "width": 64,
+        "category": "security",
+        "description": (
+            "Defines the security state configuration. Controls Non-secure bit (NS), "
+            "Hypervisor Call enable (HCE), Secure Monitor Call disable (SMD), and routing "
+            "of exceptions to EL3."
+        ),
+        "key_fields": [
+            {"bits": "[0]", "name": "NS", "description": "Non-secure bit. 0=Secure state, 1=Non-secure state."},
+            {"bits": "[8]", "name": "HCE", "description": "Hypervisor Call enable. 1=HVC instruction is enabled."},
+            {"bits": "[7]", "name": "SMD", "description": "Secure Monitor Call disable. 1=SMC is UNDEFINED at EL1 and above."},
+            {"bits": "[3]", "name": "EA", "description": "External Abort and SError routing to EL3."},
+            {"bits": "[2]", "name": "FIQ", "description": "Physical FIQ routing to EL3."},
+            {"bits": "[1]", "name": "IRQ", "description": "Physical IRQ routing to EL3."},
+        ],
+        "usage_example": "MRS X0, SCR_EL3\nORR X0, X0, #1       // Set NS bit (Non-secure)\nMSR SCR_EL3, X0",
+    },
+    "HCR_EL2": {
+        "full_name": "Hypervisor Configuration Register",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_4_C1_C1_0",
+        "width": 64,
+        "category": "security",
+        "description": (
+            "Provides configuration controls for virtualization including second-stage "
+            "translation, trapping of various operations to EL2, and virtual exception injection."
+        ),
+        "key_fields": [
+            {"bits": "[0]", "name": "VM", "description": "Virtualization enable. Enables stage 2 translation."},
+            {"bits": "[3]", "name": "FMO", "description": "Physical FIQ routing. 1=route to EL2 (virtual FIQ for guest)."},
+            {"bits": "[4]", "name": "IMO", "description": "Physical IRQ routing. 1=route to EL2 (virtual IRQ for guest)."},
+            {"bits": "[5]", "name": "AMO", "description": "Physical SError routing. 1=route to EL2."},
+            {"bits": "[31]", "name": "RW", "description": "Execution state for EL1. 0=AArch32, 1=AArch64."},
+            {"bits": "[34]", "name": "E2H", "description": "EL2 Host enable. VHE (Virtualization Host Extensions)."},
+        ],
+        "usage_example": "MRS X0, HCR_EL2\nORR X0, X0, #1       // Enable stage 2 translation\nMSR HCR_EL2, X0",
+    },
+    "CPTR_EL2": {
+        "full_name": "Architectural Feature Trap Register (EL2)",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_4_C1_C1_2",
+        "width": 64,
+        "category": "security",
+        "description": "Controls trapping to EL2 of accesses to CPACR, trace, floating-point, and Advanced SIMD functionality.",
+        "key_fields": [
+            {"bits": "[10]", "name": "TFP", "description": "Trap FP/SIMD. 1=accesses from lower ELs trap to EL2."},
+            {"bits": "[20]", "name": "TTA", "description": "Trap Trace Access."},
+        ],
+        "usage_example": "MRS X0, CPTR_EL2\nMSR CPTR_EL2, X0",
+    },
+    "CPTR_EL3": {
+        "full_name": "Architectural Feature Trap Register (EL3)",
+        "el": "EL3",
+        "access": "RW",
+        "encoding": "S3_6_C1_C1_2",
+        "width": 64,
+        "category": "security",
+        "description": "Controls trapping to EL3 of accesses to CPACR, trace, floating-point, Advanced SIMD, and SVE functionality.",
+        "key_fields": [
+            {"bits": "[10]", "name": "TFP", "description": "Trap FP/SIMD. 1=accesses trap to EL3."},
+            {"bits": "[20]", "name": "TTA", "description": "Trap Trace Access."},
+        ],
+        "usage_example": "MRS X0, CPTR_EL3\nMSR CPTR_EL3, X0",
+    },
+    "VTTBR_EL2": {
+        "full_name": "Virtualization Translation Table Base Register",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_4_C2_C1_0",
+        "width": 64,
+        "category": "security",
+        "description": "Holds the base address of the stage 2 translation table for VMs, along with the VMID.",
+        "key_fields": [
+            {"bits": "[47:1]", "name": "BADDR", "description": "Stage 2 translation table base address."},
+            {"bits": "[63:48]", "name": "VMID", "description": "Virtual Machine Identifier."},
+        ],
+        "usage_example": "MSR VTTBR_EL2, X0    // Set VM page table base",
+    },
+    "VMPIDR_EL2": {
+        "full_name": "Virtualization Multiprocessor ID Register",
+        "el": "EL2",
+        "access": "RW",
+        "encoding": "S3_4_C0_C0_5",
+        "width": 64,
+        "category": "security",
+        "description": "Holds the value of the Virtualization Multiprocessor ID, visible to EL1 reads of MPIDR_EL1 when running in a VM.",
+        "key_fields": [
+            {"bits": "[7:0]", "name": "Aff0", "description": "Virtual affinity level 0."},
+            {"bits": "[15:8]", "name": "Aff1", "description": "Virtual affinity level 1."},
+        ],
+        "usage_example": "MSR VMPIDR_EL2, X0",
+    },
+    "CONTEXTIDR_EL1": {
+        "full_name": "Context ID Register",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_0_C13_C0_1",
+        "width": 64,
+        "category": "security",
+        "description": "Holds a process ID value for the OS. Used by trace and debug to identify the current process.",
+        "key_fields": [
+            {"bits": "[31:0]", "name": "PROCID", "description": "Process ID (OS sets this, typically to PID or TID)."},
+        ],
+        "usage_example": "MRS X0, CONTEXTIDR_EL1\nMSR CONTEXTIDR_EL1, X0",
+    },
+    "TPIDR_EL0": {
+        "full_name": "EL0 Read/Write Software Thread ID Register",
+        "el": "EL0",
+        "access": "RW",
+        "encoding": "S3_3_C13_C0_2",
+        "width": 64,
+        "category": "security",
+        "description": "Software thread pointer register accessible from EL0. Used by libc/runtime for TLS (Thread-Local Storage) base pointer.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "ThreadID", "description": "Software thread identifier / TLS pointer."},
+        ],
+        "usage_example": "MRS X0, TPIDR_EL0    // Read user-space TLS pointer",
+    },
+    "TPIDR_EL1": {
+        "full_name": "EL1 Software Thread ID Register",
+        "el": "EL1",
+        "access": "RW",
+        "encoding": "S3_0_C13_C0_4",
+        "width": 64,
+        "category": "security",
+        "description": "Software thread pointer register accessible only from EL1 and above. Used by the OS kernel for per-CPU or per-thread data.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "ThreadID", "description": "Kernel thread/CPU pointer."},
+        ],
+        "usage_example": "MRS X0, TPIDR_EL1\nMSR TPIDR_EL1, X0",
+    },
+    "TPIDRRO_EL0": {
+        "full_name": "EL0 Read-Only Software Thread ID Register",
+        "el": "EL0",
+        "access": "RO",
+        "encoding": "S3_3_C13_C0_3",
+        "width": 64,
+        "category": "security",
+        "description": "Thread pointer register read-only from EL0 but writable from EL1. Kernel sets it; user space reads it.",
+        "key_fields": [
+            {"bits": "[63:0]", "name": "ThreadID", "description": "Read-only thread identifier for EL0."},
+        ],
+        "usage_example": "MRS X0, TPIDRRO_EL0   // Read kernel-set thread pointer from user space",
+    },
+}
+
+_SYSREG_CATEGORY_LABELS: dict[str, str] = {
+    "memory_management": "Memory Management",
+    "exception": "Exception Handling",
+    "id": "ID Registers (Read-Only)",
+    "perf_debug": "Performance / Debug",
+    "timer": "Timer",
+    "security": "Security / Virtualization",
+}
+
+
+def _format_system_register(name: str, reg: dict) -> str:
+    """Format a single system register entry as readable text."""
+    access_text = "Read/Write" if reg["access"] == "RW" else "Read-Only"
+    lines = [
+        f"# System Register: {name}",
+        "",
+        f"**Full Name:** {reg['full_name']}",
+        f"**Exception Level:** {reg['el']}",
+        f"**Access:** {access_text}",
+        f"**Encoding:** {reg['encoding']}",
+        f"**Width:** {reg['width']}-bit",
+        f"**Category:** {_SYSREG_CATEGORY_LABELS.get(reg['category'], reg['category'])}",
+        "",
+        "## Description",
+        reg["description"],
+    ]
+
+    if reg.get("key_fields"):
+        lines.append("")
+        lines.append("## Key Fields")
+        lines.append("| Bits | Name | Description |")
+        lines.append("|------|------|-------------|")
+        for f in reg["key_fields"]:
+            lines.append(f"| {f['bits']} | {f['name']} | {f['description']} |")
+
+    if reg.get("usage_example"):
+        lines.append("")
+        lines.append("## Access Example")
+        lines.append("```asm")
+        lines.append(reg["usage_example"])
+        lines.append("```")
+
+    return "\n".join(lines)
+
+
+def _list_system_registers_by_el(el: str) -> str:
+    """List all system registers for a given exception level."""
+    el_upper = el.upper()
+    matches = {
+        name: reg for name, reg in _SYSTEM_REGISTERS.items() if reg["el"] == el_upper
+    }
+    if not matches:
+        return f"Error: No system registers found for exception level '{el}'."
+
+    lines = [f"# System Registers at {el_upper}", ""]
+    # Group by category
+    by_cat: dict[str, list[str]] = {}
+    for name, reg in matches.items():
+        cat = reg["category"]
+        by_cat.setdefault(cat, []).append(name)
+
+    for cat, label in _SYSREG_CATEGORY_LABELS.items():
+        if cat in by_cat:
+            lines.append(f"## {label}")
+            for name in sorted(by_cat[cat]):
+                reg = _SYSTEM_REGISTERS[name]
+                acc = "RO" if reg["access"] == "RO" else "RW"
+                lines.append(f"  {name:<25} {acc}  {reg['full_name']}")
+            lines.append("")
+
+    lines.append(f"Total: {len(matches)} registers at {el_upper}")
+    return "\n".join(lines)
+
+
+def _list_all_system_registers() -> str:
+    """List all system registers grouped by category."""
+    lines = ["# All AArch64 System Registers", ""]
+    for cat, label in _SYSREG_CATEGORY_LABELS.items():
+        regs_in_cat = {
+            name: reg
+            for name, reg in _SYSTEM_REGISTERS.items()
+            if reg["category"] == cat
+        }
+        if regs_in_cat:
+            lines.append(f"## {label}")
+            for name in sorted(regs_in_cat):
+                reg = regs_in_cat[name]
+                acc = "RO" if reg["access"] == "RO" else "RW"
+                lines.append(
+                    f"  {name:<25} {reg['el']:<5} {acc}  {reg['full_name']}"
+                )
+            lines.append("")
+
+    lines.append(f"Total: {len(_SYSTEM_REGISTERS)} system registers")
+    return "\n".join(lines)
+
+
+def _list_system_registers_by_category(category: str) -> str:
+    """List system registers filtered by category key."""
+    matches = {
+        name: reg
+        for name, reg in _SYSTEM_REGISTERS.items()
+        if reg["category"] == category
+    }
+    if not matches:
+        return f"Error: No system registers found for category '{category}'."
+
+    label = _SYSREG_CATEGORY_LABELS.get(category, category)
+    lines = [f"# System Registers — {label}", ""]
+    for name in sorted(matches):
+        reg = matches[name]
+        acc = "RO" if reg["access"] == "RO" else "RW"
+        lines.append(f"  {name:<25} {reg['el']:<5} {acc}  {reg['full_name']}")
+    lines.append("")
+    lines.append(f"Total: {len(matches)} registers")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def lookup_system_register(register: str, el: str | None = None) -> str:
+    """Look up an AArch64 system register by name.
+
+    Returns detailed information about the register including its encoding,
+    bit fields, access type, and usage examples. The system register space
+    covers hundreds of MRS/MSR-accessible registers used for memory management,
+    exception handling, performance monitoring, debug, timers, and security.
+
+    Args:
+        register: System register name (e.g. "SCTLR_EL1", "TCR_EL1", "HCR_EL2").
+            Special queries:
+            "list" -- List all registers (optionally filtered by el)
+            "memory" or "mmu" -- Show all memory management registers
+            "timer" -- Show all timer registers
+            "id" -- Show all ID registers
+            "perf" or "pmu" -- Show all performance/debug registers
+        el: Optional exception level filter ("EL0", "EL1", "EL2", "EL3").
+            Used with "list" to filter by EL; ignored for direct lookups.
+    """
+    key = register.strip().upper()
+
+    # Special queries
+    if key == "LIST":
+        if el is not None:
+            return _list_system_registers_by_el(el)
+        return _list_all_system_registers()
+
+    if key in ("MEMORY", "MMU"):
+        return _list_system_registers_by_category("memory_management")
+
+    if key == "TIMER":
+        return _list_system_registers_by_category("timer")
+
+    if key == "ID":
+        return _list_system_registers_by_category("id")
+
+    if key in ("PERF", "PMU"):
+        return _list_system_registers_by_category("perf_debug")
+
+    # Direct register lookup
+    if key in _SYSTEM_REGISTERS:
+        return _format_system_register(key, _SYSTEM_REGISTERS[key])
+
+    # Not found
+    return (
+        f"Error: System register '{register}' not found.\n\n"
+        f"Use lookup_system_register('list') to see all available system registers, "
+        f"or try one of the special queries: 'memory', 'timer', 'id', 'perf'."
+    )
+
+# ---------------------------------------------------------------------------
+# Tool 18: explain_performance_counter — ARM PMU event reference
+# ---------------------------------------------------------------------------
+
+_PMU_EVENTS: dict[str, dict] = {
+    "SW_INCR": {
+        "event_name": "SW_INCR",
+        "event_number": "0x00",
+        "category": "misc",
+        "description": (
+            "Counts software increments. The counter only increments when "
+            "software writes to the PMSWINC_EL0 register. This allows software "
+            "to count arbitrary events by manually triggering the increment."
+        ),
+        "when_to_use": (
+            "Use for custom software event counting — e.g., counting function "
+            "calls, loop iterations, or specific code-path hits from within "
+            "the application or OS. Useful for correlating software events with "
+            "hardware PMU data."
+        ),
+        "formula_tips": [
+            "Custom metric = SW_INCR / CPU_CYCLES (rate of software events per cycle)",
+        ],
+        "linux_perf_name": "sw_incr",
+        "ai_workload_tips": (
+            "Instrument inference entry/exit points to count per-layer or "
+            "per-operator invocations. Combine with cycle counters to get "
+            "operator-level throughput."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x00  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L1I_CACHE_REFILL": {
+        "event_name": "L1I_CACHE_REFILL",
+        "event_number": "0x01",
+        "category": "cache",
+        "description": (
+            "Counts each cache line refill into the L1 instruction cache, "
+            "caused by an instruction fetch that misses in the L1I cache. "
+            "Each refill represents a full cache line fetch from a higher "
+            "level of the memory hierarchy."
+        ),
+        "when_to_use": (
+            "Profile code with large instruction footprints (e.g., deeply "
+            "inlined template code, JIT-compiled code). A high L1I refill "
+            "rate indicates instruction working set exceeds L1I capacity."
+        ),
+        "formula_tips": [
+            "L1I miss rate = L1I_CACHE_REFILL / L1I_CACHE",
+            "MPKI (misses per 1K instructions) = L1I_CACHE_REFILL * 1000 / INST_RETIRED",
+        ],
+        "linux_perf_name": "l1i_cache_refill",
+        "ai_workload_tips": (
+            "Large ML frameworks can have huge code footprints. If L1I miss rate "
+            "is high, consider profile-guided optimization (PGO) or reducing "
+            "template instantiations. JIT compilers (TVM, XLA) should aim for "
+            "compact generated code."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x01  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L1I_TLB_REFILL": {
+        "event_name": "L1I_TLB_REFILL",
+        "event_number": "0x02",
+        "category": "tlb",
+        "description": (
+            "Counts each refill of the L1 instruction TLB caused by an "
+            "instruction fetch that misses in the L1 ITLB. This triggers "
+            "a page table walk or L2 TLB lookup."
+        ),
+        "when_to_use": (
+            "Profile applications with large code footprints spread across "
+            "many pages. High ITLB miss rates indicate the instruction working "
+            "set spans too many pages."
+        ),
+        "formula_tips": [
+            "ITLB miss rate = L1I_TLB_REFILL / L1I_TLB",
+            "Consider huge pages if ITLB miss rate > 1%",
+        ],
+        "linux_perf_name": "l1i_tlb_refill",
+        "ai_workload_tips": (
+            "Large ML frameworks with many shared libraries can suffer ITLB "
+            "pressure. Use huge pages for code sections or link statically to "
+            "reduce code spread across pages."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x02  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L1D_CACHE_REFILL": {
+        "event_name": "L1D_CACHE_REFILL",
+        "event_number": "0x03",
+        "category": "cache",
+        "description": (
+            "Counts each cache line refill into the L1 data cache caused by "
+            "a data access that misses in the L1D cache. Each refill brings "
+            "a full cache line (typically 64 bytes) from a higher level of "
+            "the memory hierarchy."
+        ),
+        "when_to_use": (
+            "Profile memory-intensive code. High refill rate indicates poor "
+            "spatial locality or cache thrashing. This is one of the most "
+            "important events for performance tuning."
+        ),
+        "formula_tips": [
+            "L1D miss rate = L1D_CACHE_REFILL / L1D_CACHE",
+            "Combine with MEM_ACCESS to understand memory hierarchy pressure",
+            "MPKI = L1D_CACHE_REFILL * 1000 / INST_RETIRED",
+        ],
+        "linux_perf_name": "l1d_cache_refill",
+        "ai_workload_tips": (
+            "For ML inference, high L1D misses suggest tensor data layout is "
+            "not cache-friendly. Consider tiling or NHWC to NCHW layout changes. "
+            "For GEMM, ensure inner-loop data fits in L1D."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x03  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L1D_CACHE": {
+        "event_name": "L1D_CACHE",
+        "event_number": "0x04",
+        "category": "cache",
+        "description": (
+            "Counts each access that looks up in the L1 data cache. This "
+            "includes both hits and misses. The count includes load, store, "
+            "and atomic operations."
+        ),
+        "when_to_use": (
+            "Use as a denominator for L1D miss-rate calculations. High access "
+            "count is normal for data-intensive code; the miss rate "
+            "(L1D_CACHE_REFILL / L1D_CACHE) is what matters."
+        ),
+        "formula_tips": [
+            "L1D miss rate = L1D_CACHE_REFILL / L1D_CACHE",
+            "L1D access intensity = L1D_CACHE / INST_RETIRED",
+        ],
+        "linux_perf_name": "l1d_cache",
+        "ai_workload_tips": (
+            "High L1D access rate with low miss rate means data is cache-resident. "
+            "This is the ideal state for compute-bound ML kernels."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x04  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L1D_TLB_REFILL": {
+        "event_name": "L1D_TLB_REFILL",
+        "event_number": "0x05",
+        "category": "tlb",
+        "description": (
+            "Counts each refill of the L1 data TLB caused by a data access "
+            "that misses in the L1 DTLB. Each miss triggers either a L2 TLB "
+            "lookup or a full page table walk."
+        ),
+        "when_to_use": (
+            "Profile applications with large data footprints or random access "
+            "patterns across many pages. High DTLB refill rates add latency "
+            "to every missing access."
+        ),
+        "formula_tips": [
+            "DTLB miss rate = L1D_TLB_REFILL / L1D_TLB",
+            "If DTLB miss rate > 1%, consider huge pages (2MB or 1GB)",
+        ],
+        "linux_perf_name": "l1d_tlb_refill",
+        "ai_workload_tips": (
+            "Large tensor allocations with random access patterns (e.g., "
+            "embedding table lookups) cause DTLB pressure. Use huge pages "
+            "(madvise MADV_HUGEPAGE) for tensor memory."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x05  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "INST_RETIRED": {
+        "event_name": "INST_RETIRED",
+        "event_number": "0x08",
+        "category": "instruction",
+        "description": (
+            "Counts each instruction that is architecturally executed. "
+            "This excludes speculated instructions that are later flushed. "
+            "It is the definitive count of useful work done by the processor."
+        ),
+        "when_to_use": (
+            "Fundamental event for IPC (Instructions Per Cycle) calculation. "
+            "Use as a baseline denominator for MPKI and other per-instruction "
+            "metrics."
+        ),
+        "formula_tips": [
+            "IPC = INST_RETIRED / CPU_CYCLES",
+            "MPKI = <miss_event> * 1000 / INST_RETIRED",
+            "Speculation overhead = (OP_SPEC - OP_RETIRED) / OP_SPEC",
+        ],
+        "linux_perf_name": "inst_retired",
+        "ai_workload_tips": (
+            "IPC is a primary indicator of CPU efficiency. For ML inference, "
+            "IPC > 2.0 on modern ARM cores is good. Low IPC suggests memory "
+            "stalls or branch mispredictions."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x08  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "EXC_TAKEN": {
+        "event_name": "EXC_TAKEN",
+        "event_number": "0x09",
+        "category": "misc",
+        "description": (
+            "Counts each exception taken, including IRQs, FIQs, SVC calls, "
+            "data aborts, prefetch aborts, and undefined instruction exceptions. "
+            "This counts the architectural event of entering an exception handler."
+        ),
+        "when_to_use": (
+            "Monitor interrupt and exception frequency. High exception rates "
+            "can indicate excessive system calls, timer interrupts, or error "
+            "conditions degrading performance."
+        ),
+        "formula_tips": [
+            "Exception rate = EXC_TAKEN / CPU_CYCLES",
+            "Exception overhead = EXC_TAKEN * avg_handler_cycles / CPU_CYCLES",
+        ],
+        "linux_perf_name": "exc_taken",
+        "ai_workload_tips": (
+            "Frequent interrupts during ML inference add jitter and reduce "
+            "throughput. Consider CPU isolation (isolcpus), interrupt affinity, "
+            "and NOHZ_FULL to minimize exceptions on compute cores."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x09  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "EXC_RETURN": {
+        "event_name": "EXC_RETURN",
+        "event_number": "0x0A",
+        "category": "misc",
+        "description": (
+            "Counts each exception return executed (ERET instruction). "
+            "This represents the completion of exception handling and return "
+            "to the interrupted context."
+        ),
+        "when_to_use": (
+            "Use with EXC_TAKEN to verify exception handling is balanced. "
+            "A difference between EXC_TAKEN and EXC_RETURN may indicate "
+            "nested exceptions or tail-chained interrupts."
+        ),
+        "formula_tips": [
+            "Nested exception rate = (EXC_TAKEN - EXC_RETURN) / EXC_TAKEN",
+            "Time in exception handlers approx = (EXC_TAKEN - EXC_RETURN) * latency",
+        ],
+        "linux_perf_name": "exc_return",
+        "ai_workload_tips": (
+            "Monitor EXC_TAKEN vs EXC_RETURN balance during inference to "
+            "detect interrupt storms or excessive kernel re-entry."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x0A  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "BR_MIS_PRED": {
+        "event_name": "BR_MIS_PRED",
+        "event_number": "0x10",
+        "category": "branch",
+        "description": (
+            "Counts each branch that is mispredicted or not predicted by the "
+            "branch prediction unit. This causes a pipeline flush and refetch "
+            "from the correct target, wasting cycles proportional to the "
+            "pipeline depth."
+        ),
+        "when_to_use": (
+            "Profile code with unpredictable branches (data-dependent control "
+            "flow, virtual dispatch, switch statements with many cases). "
+            "Each mispredict costs 10-20+ cycles on modern cores."
+        ),
+        "formula_tips": [
+            "Branch mispredict rate = BR_MIS_PRED / BR_PRED",
+            "Mispredict penalty cycles (approx) = BR_MIS_PRED * pipeline_depth",
+            "MPKI = BR_MIS_PRED * 1000 / INST_RETIRED",
+        ],
+        "linux_perf_name": "br_mis_pred",
+        "ai_workload_tips": (
+            "Neural network inference with conditional operators (dynamic shapes, "
+            "sparse activations) can cause branch mispredictions. Consider branchless "
+            "implementations (CSEL, predication) for hot paths."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x10  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "CPU_CYCLES": {
+        "event_name": "CPU_CYCLES",
+        "event_number": "0x11",
+        "category": "misc",
+        "description": (
+            "Counts every CPU clock cycle. This is the fundamental time "
+            "reference for all cycle-based metrics. It counts actual cycles, "
+            "so frequency scaling (DVFS) affects the relationship between "
+            "cycles and wall-clock time."
+        ),
+        "when_to_use": (
+            "Essential baseline event. Used as denominator for almost all "
+            "PMU metrics (IPC, miss rates, stall ratios). Always include "
+            "CPU_CYCLES in any PMU measurement session."
+        ),
+        "formula_tips": [
+            "IPC = INST_RETIRED / CPU_CYCLES",
+            "CPI = CPU_CYCLES / INST_RETIRED",
+            "Stall ratio = STALL_FRONTEND / CPU_CYCLES + STALL_BACKEND / CPU_CYCLES",
+        ],
+        "linux_perf_name": "cpu_cycles",
+        "ai_workload_tips": (
+            "Lock CPU frequency (performance governor) during benchmarking to "
+            "ensure cycle counts are comparable across runs. Use cycles rather "
+            "than wall time for micro-benchmarks."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x11  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "BR_PRED": {
+        "event_name": "BR_PRED",
+        "event_number": "0x12",
+        "category": "branch",
+        "description": (
+            "Counts each predictable branch instruction executed, whether "
+            "correctly predicted or mispredicted. This provides the total "
+            "branch count for computing mispredict rates."
+        ),
+        "when_to_use": (
+            "Use as the denominator for branch mispredict rate calculation. "
+            "A high branch density (BR_PRED / INST_RETIRED) may indicate "
+            "code that could benefit from if-conversion or vectorization."
+        ),
+        "formula_tips": [
+            "Branch mispredict rate = BR_MIS_PRED / BR_PRED",
+            "Branch density = BR_PRED / INST_RETIRED",
+        ],
+        "linux_perf_name": "br_pred",
+        "ai_workload_tips": (
+            "High branch density in ML kernels often indicates scalar control "
+            "flow that could be vectorized with SVE/NEON predicated operations."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x12  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "MEM_ACCESS": {
+        "event_name": "MEM_ACCESS",
+        "event_number": "0x13",
+        "category": "memory",
+        "description": (
+            "Counts each memory access (data read or write) issued by the "
+            "processor. This includes L1D cache hits, L1D misses, and "
+            "uncacheable accesses."
+        ),
+        "when_to_use": (
+            "Profile overall memory access intensity. Combine with cache "
+            "miss events to understand the memory hierarchy behavior of "
+            "your workload."
+        ),
+        "formula_tips": [
+            "Memory access rate = MEM_ACCESS / INST_RETIRED",
+            "L1D hit rate = 1 - (L1D_CACHE_REFILL / MEM_ACCESS)",
+            "Bytes accessed per cycle = MEM_ACCESS * cache_line_size / CPU_CYCLES",
+        ],
+        "linux_perf_name": "mem_access",
+        "ai_workload_tips": (
+            "For GEMM and convolution kernels, high MEM_ACCESS with low miss "
+            "rate indicates good data reuse. For memory-bound ops (element-wise, "
+            "batch norm), optimize for memory bandwidth."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x13  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L1I_CACHE": {
+        "event_name": "L1I_CACHE",
+        "event_number": "0x14",
+        "category": "cache",
+        "description": (
+            "Counts each access that looks up in the L1 instruction cache. "
+            "This includes both hits and misses. Provides the total "
+            "instruction fetch count for L1I miss rate calculation."
+        ),
+        "when_to_use": (
+            "Use as denominator for L1I miss rate. High L1I access count "
+            "with low miss rate means instruction working set fits in cache."
+        ),
+        "formula_tips": [
+            "L1I miss rate = L1I_CACHE_REFILL / L1I_CACHE",
+        ],
+        "linux_perf_name": "l1i_cache",
+        "ai_workload_tips": (
+            "ML frameworks with many operator implementations can have large "
+            "instruction footprints. Monitor L1I miss rate to detect icache "
+            "pressure from bloated binaries."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x14  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L1D_CACHE_WB": {
+        "event_name": "L1D_CACHE_WB",
+        "event_number": "0x15",
+        "category": "cache",
+        "description": (
+            "Counts each write-back of a dirty cache line from the L1 data "
+            "cache to the next level of the memory hierarchy. Write-backs "
+            "occur when a dirty line is evicted from L1D."
+        ),
+        "when_to_use": (
+            "Profile write-intensive code. High write-back rate combined with "
+            "high L1D_CACHE_REFILL indicates cache thrashing with dirty data. "
+            "This puts pressure on memory bandwidth."
+        ),
+        "formula_tips": [
+            "Write-back ratio = L1D_CACHE_WB / L1D_CACHE",
+            "Dirty eviction rate = L1D_CACHE_WB / L1D_CACHE_REFILL",
+        ],
+        "linux_perf_name": "l1d_cache_wb",
+        "ai_workload_tips": (
+            "Training workloads with large gradient updates generate many "
+            "write-backs. Ensure write buffers are not saturated. Consider "
+            "non-temporal stores for write-only output tensors."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x15  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L2D_CACHE": {
+        "event_name": "L2D_CACHE",
+        "event_number": "0x16",
+        "category": "cache",
+        "description": (
+            "Counts each access that looks up in the L2 data cache (or "
+            "unified L2 cache). Includes hits and misses from L1D refills, "
+            "L1I refills, and hardware prefetches."
+        ),
+        "when_to_use": (
+            "Profile L2 cache behavior. High L2 access rate with low L2 "
+            "miss rate (L2D_CACHE_REFILL / L2D_CACHE) means data fits "
+            "within L1+L2 capacity."
+        ),
+        "formula_tips": [
+            "L2 miss rate = L2D_CACHE_REFILL / L2D_CACHE",
+            "L2 MPKI = L2D_CACHE_REFILL * 1000 / INST_RETIRED",
+        ],
+        "linux_perf_name": "l2d_cache",
+        "ai_workload_tips": (
+            "For ML inference, tile sizes should be chosen so that working "
+            "sets fit in L2 (typically 256KB-1MB per core). Monitor L2 miss "
+            "rate to validate tiling strategy."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x16  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L2D_CACHE_REFILL": {
+        "event_name": "L2D_CACHE_REFILL",
+        "event_number": "0x17",
+        "category": "cache",
+        "description": (
+            "Counts each cache line refill into the L2 data cache caused "
+            "by an L2 miss. This data must be fetched from L3/LLC or main "
+            "memory, incurring significant latency (50-200+ cycles)."
+        ),
+        "when_to_use": (
+            "Profile workloads that exceed L2 capacity. L2 misses are "
+            "expensive and often the dominant source of backend stalls "
+            "on memory-bound workloads."
+        ),
+        "formula_tips": [
+            "L2 miss rate = L2D_CACHE_REFILL / L2D_CACHE",
+            "L2 MPKI = L2D_CACHE_REFILL * 1000 / INST_RETIRED",
+            "Estimated bandwidth = L2D_CACHE_REFILL * 64 / time_seconds (bytes/sec)",
+        ],
+        "linux_perf_name": "l2d_cache_refill",
+        "ai_workload_tips": (
+            "L2 misses are the biggest performance limiter for many ML workloads. "
+            "Use cache-blocking / tiling to keep working sets in L2. For "
+            "Neoverse V2 (1MB L2), target tile sizes < 768KB."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x17  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L2D_CACHE_WB": {
+        "event_name": "L2D_CACHE_WB",
+        "event_number": "0x18",
+        "category": "cache",
+        "description": (
+            "Counts each write-back of a dirty cache line from the L2 cache "
+            "to the next level (L3/LLC or main memory). Each write-back "
+            "consumes memory bandwidth."
+        ),
+        "when_to_use": (
+            "Profile write-heavy workloads that generate L2 write-backs. "
+            "High L2 write-backs combined with L2 refills indicate the "
+            "working set significantly exceeds L2 capacity."
+        ),
+        "formula_tips": [
+            "L2 write-back ratio = L2D_CACHE_WB / L2D_CACHE",
+            "Total L2 bandwidth = (L2D_CACHE_REFILL + L2D_CACHE_WB) * 64 / time",
+        ],
+        "linux_perf_name": "l2d_cache_wb",
+        "ai_workload_tips": (
+            "Training workloads generate large numbers of L2 write-backs "
+            "due to gradient computation. Monitor total L2 bandwidth to "
+            "ensure memory subsystem is not saturated."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x18  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "BUS_ACCESS": {
+        "event_name": "BUS_ACCESS",
+        "event_number": "0x19",
+        "category": "memory",
+        "description": (
+            "Counts each access to the external bus or interconnect (e.g., "
+            "AMBA/AXI). This includes LLC misses that must be serviced from "
+            "main memory or another core's cache (coherence traffic)."
+        ),
+        "when_to_use": (
+            "Profile memory bandwidth utilization. High bus access rates "
+            "may indicate memory bandwidth saturation, which limits "
+            "scalability on multi-core workloads."
+        ),
+        "formula_tips": [
+            "Bus bandwidth = BUS_ACCESS * cache_line_size / time_seconds",
+            "Bus accesses per instruction = BUS_ACCESS / INST_RETIRED",
+        ],
+        "linux_perf_name": "bus_access",
+        "ai_workload_tips": (
+            "For multi-core ML inference, monitor BUS_ACCESS to detect "
+            "memory bandwidth contention. Consider NUMA-aware allocation "
+            "and per-core data partitioning."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x19  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "MEMORY_ERROR": {
+        "event_name": "MEMORY_ERROR",
+        "event_number": "0x1A",
+        "category": "memory",
+        "description": (
+            "Counts local memory errors that have been corrected (ECC) or "
+            "detected. This includes single-bit correctable errors (CE) in "
+            "caches, TLBs, and RAM."
+        ),
+        "when_to_use": (
+            "Monitor memory subsystem health. Non-zero counts may indicate "
+            "hardware issues (aging DRAM, thermal problems). Track over time "
+            "to detect degradation trends."
+        ),
+        "formula_tips": [
+            "Error rate = MEMORY_ERROR / CPU_CYCLES",
+            "Any non-zero count warrants investigation",
+        ],
+        "linux_perf_name": "memory_error",
+        "ai_workload_tips": (
+            "Memory errors can cause silent data corruption in ML workloads, "
+            "leading to incorrect inference results or training divergence. "
+            "Enable ECC and monitor this counter in production."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x1A  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "BUS_CYCLES": {
+        "event_name": "BUS_CYCLES",
+        "event_number": "0x1D",
+        "category": "memory",
+        "description": (
+            "Counts bus clock cycles. The bus may run at a different "
+            "frequency than the CPU core, so BUS_CYCLES and CPU_CYCLES "
+            "may increment at different rates."
+        ),
+        "when_to_use": (
+            "Measure bus utilization and determine the ratio of bus "
+            "frequency to core frequency. Useful for understanding "
+            "memory subsystem timing."
+        ),
+        "formula_tips": [
+            "Bus/Core frequency ratio = BUS_CYCLES / CPU_CYCLES",
+            "Bus utilization = BUS_ACCESS / BUS_CYCLES",
+        ],
+        "linux_perf_name": "bus_cycles",
+        "ai_workload_tips": (
+            "If bus utilization is high (close to 1.0), memory bandwidth "
+            "is saturated. Consider reducing data movement or using "
+            "compression for tensor data."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x1D  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "CHAIN": {
+        "event_name": "CHAIN",
+        "event_number": "0x1E",
+        "category": "misc",
+        "description": (
+            "Used for chaining two consecutive PMU counters to form a "
+            "single 64-bit counter. When counter N overflows, it increments "
+            "counter N+1 if counter N+1 is programmed with the CHAIN event. "
+            "This allows counting beyond the 32-bit limit of a single counter."
+        ),
+        "when_to_use": (
+            "Use when you need to count events that exceed 2^32 (about 4 "
+            "billion). Common for CPU_CYCLES or INST_RETIRED on long-running "
+            "workloads without interrupt-based overflow handling."
+        ),
+        "formula_tips": [
+            "64-bit count = (counter_N+1 << 32) | counter_N",
+            "Consumes two PMU counters for one 64-bit measurement",
+        ],
+        "linux_perf_name": "chain",
+        "ai_workload_tips": (
+            "Long-running training jobs may overflow 32-bit counters. "
+            "Linux perf handles this automatically via interrupt-on-overflow, "
+            "but bare-metal profiling may need CHAIN."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x1E  // Select event (counter 1 = CHAIN)\nMSR PMEVTYPER1_EL0, #0x11  // Counter 0 = CPU_CYCLES\nMSR PMCNTENSET_EL0, #0x03  // Enable counters 0 and 1",
+    },
+    "L1D_CACHE_ALLOCATE": {
+        "event_name": "L1D_CACHE_ALLOCATE",
+        "event_number": "0x1F",
+        "category": "cache",
+        "description": (
+            "Counts each allocation of a cache line into the L1 data cache. "
+            "This is similar to L1D_CACHE_REFILL but may also count "
+            "speculative allocations depending on the implementation."
+        ),
+        "when_to_use": (
+            "Compare with L1D_CACHE_REFILL to detect speculative cache "
+            "allocations. A large difference indicates the prefetcher or "
+            "speculative execution is populating the cache."
+        ),
+        "formula_tips": [
+            "Speculative allocation ratio = (L1D_CACHE_ALLOCATE - L1D_CACHE_REFILL) / L1D_CACHE_ALLOCATE",
+        ],
+        "linux_perf_name": "l1d_cache_allocate",
+        "ai_workload_tips": (
+            "If L1D_CACHE_ALLOCATE >> L1D_CACHE_REFILL, the hardware "
+            "prefetcher is active. This is generally beneficial for ML "
+            "workloads with sequential access patterns."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x1F  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "STALL_FRONTEND": {
+        "event_name": "STALL_FRONTEND",
+        "event_number": "0x23",
+        "category": "stall",
+        "description": (
+            "Counts cycles where the frontend (fetch and decode stages) "
+            "cannot deliver instructions to the backend. Causes include "
+            "L1I cache misses, ITLB misses, branch mispredictions that "
+            "flush the pipeline, and instruction buffer starvation."
+        ),
+        "when_to_use": (
+            "Use in TopDown analysis to determine if the workload is "
+            "frontend-bound. High STALL_FRONTEND / CPU_CYCLES indicates "
+            "instruction delivery is the bottleneck."
+        ),
+        "formula_tips": [
+            "Frontend Bound = STALL_FRONTEND / CPU_CYCLES",
+            "If Frontend Bound > 20%, investigate L1I misses and branch prediction",
+        ],
+        "linux_perf_name": "stall_frontend",
+        "ai_workload_tips": (
+            "ML frameworks with large codebases and deep call stacks can be "
+            "frontend-bound. Use PGO, LTO, and BOLT to optimize code layout "
+            "and reduce frontend stalls."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x23  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "STALL_BACKEND": {
+        "event_name": "STALL_BACKEND",
+        "event_number": "0x24",
+        "category": "stall",
+        "description": (
+            "Counts cycles where the backend (execution and memory stages) "
+            "cannot accept instructions from the frontend. Causes include "
+            "L1D/L2 cache misses, DTLB misses, long-latency operations "
+            "(divides, memory barriers), and resource exhaustion (ROB full, "
+            "reservation station full)."
+        ),
+        "when_to_use": (
+            "Use in TopDown analysis to determine if the workload is "
+            "backend-bound. High STALL_BACKEND / CPU_CYCLES indicates "
+            "data access or execution resources are the bottleneck."
+        ),
+        "formula_tips": [
+            "Backend Bound = STALL_BACKEND / CPU_CYCLES",
+            "If Backend Bound > 30%, investigate cache misses and memory latency",
+        ],
+        "linux_perf_name": "stall_backend",
+        "ai_workload_tips": (
+            "Most ML workloads are backend-bound due to memory access patterns. "
+            "Reduce backend stalls by improving data locality (tiling, packing), "
+            "using prefetch hints, and optimizing memory layout."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x24  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L1D_TLB": {
+        "event_name": "L1D_TLB",
+        "event_number": "0x25",
+        "category": "tlb",
+        "description": (
+            "Counts each access that looks up in the L1 data TLB. "
+            "Includes both hits and misses. Provides the total data "
+            "TLB access count for miss rate calculations."
+        ),
+        "when_to_use": (
+            "Use as denominator for L1 DTLB miss rate calculation. "
+            "Compare with L1D_TLB_REFILL to determine TLB pressure."
+        ),
+        "formula_tips": [
+            "DTLB miss rate = L1D_TLB_REFILL / L1D_TLB",
+            "TLB accesses per instruction = L1D_TLB / INST_RETIRED",
+        ],
+        "linux_perf_name": "l1d_tlb",
+        "ai_workload_tips": (
+            "High TLB access rate with high miss rate suggests data is "
+            "spread across too many pages. Use huge pages for tensor "
+            "allocations to reduce TLB pressure."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x25  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L1I_TLB": {
+        "event_name": "L1I_TLB",
+        "event_number": "0x26",
+        "category": "tlb",
+        "description": (
+            "Counts each access that looks up in the L1 instruction TLB. "
+            "Includes both hits and misses. Provides the total instruction "
+            "TLB access count."
+        ),
+        "when_to_use": (
+            "Use as denominator for L1 ITLB miss rate. High ITLB miss "
+            "rate can cause frontend stalls."
+        ),
+        "formula_tips": [
+            "ITLB miss rate = L1I_TLB_REFILL / L1I_TLB",
+        ],
+        "linux_perf_name": "l1i_tlb",
+        "ai_workload_tips": (
+            "ITLB misses are rare unless code is spread across many pages. "
+            "Consider huge pages for code or use BOLT to compact hot code."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x26  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "BR_RETIRED": {
+        "event_name": "BR_RETIRED",
+        "event_number": "0x21",
+        "category": "branch",
+        "description": (
+            "Counts each branch instruction that is architecturally executed "
+            "(retired). This is the definitive count of branches that "
+            "completed execution, excluding speculated branches."
+        ),
+        "when_to_use": (
+            "Profile branch frequency in your code. High branch density "
+            "may indicate opportunities for branchless optimizations or "
+            "loop vectorization."
+        ),
+        "formula_tips": [
+            "Branch density = BR_RETIRED / INST_RETIRED",
+            "Mispredict rate (retired) = BR_MIS_PRED_RETIRED / BR_RETIRED",
+        ],
+        "linux_perf_name": "br_retired",
+        "ai_workload_tips": (
+            "Vectorized ML kernels should have low branch density. High "
+            "branch density in hot loops suggests scalar fallback paths "
+            "are being taken."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x21  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "BR_MIS_PRED_RETIRED": {
+        "event_name": "BR_MIS_PRED_RETIRED",
+        "event_number": "0x22",
+        "category": "branch",
+        "description": (
+            "Counts each mispredicted branch instruction that is "
+            "architecturally executed (retired). Unlike BR_MIS_PRED, this "
+            "only counts branches that actually completed, not speculative "
+            "mispredictions on wrong-path instructions."
+        ),
+        "when_to_use": (
+            "More accurate than BR_MIS_PRED for measuring true mispredict "
+            "cost. Use for precise branch analysis where speculative "
+            "overcounting would be misleading."
+        ),
+        "formula_tips": [
+            "Precise mispredict rate = BR_MIS_PRED_RETIRED / BR_RETIRED",
+            "Speculation noise = BR_MIS_PRED - BR_MIS_PRED_RETIRED",
+        ],
+        "linux_perf_name": "br_mis_pred_retired",
+        "ai_workload_tips": (
+            "For production inference profiling, prefer this over BR_MIS_PRED "
+            "for accurate attribution of misprediction overhead to specific "
+            "code regions."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x22  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L2D_TLB_REFILL": {
+        "event_name": "L2D_TLB_REFILL",
+        "event_number": "0x2D",
+        "category": "tlb",
+        "description": (
+            "Counts each refill of the L2 unified TLB caused by a data or "
+            "instruction access that misses in both L1 TLB and L2 TLB. "
+            "This triggers a full page table walk, which is very expensive "
+            "(100+ cycles)."
+        ),
+        "when_to_use": (
+            "Profile workloads with very large memory footprints. L2 TLB "
+            "misses are extremely costly due to page table walks through "
+            "multiple levels of translation tables."
+        ),
+        "formula_tips": [
+            "L2 TLB miss rate = L2D_TLB_REFILL / L2D_TLB",
+            "Page walk rate = L2D_TLB_REFILL / INST_RETIRED",
+        ],
+        "linux_perf_name": "l2d_tlb_refill",
+        "ai_workload_tips": (
+            "Large embedding tables and feature maps can cause L2 TLB misses. "
+            "Use 2MB or 1GB huge pages (hugetlbfs or transparent huge pages) "
+            "to drastically reduce page walks."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x2D  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "L2D_TLB": {
+        "event_name": "L2D_TLB",
+        "event_number": "0x2F",
+        "category": "tlb",
+        "description": (
+            "Counts each access that looks up in the L2 unified TLB. "
+            "This is the total L2 TLB access count including hits and "
+            "misses from L1 TLB refills."
+        ),
+        "when_to_use": (
+            "Use as denominator for L2 TLB miss rate. High L2 TLB access "
+            "count indicates significant L1 TLB miss traffic."
+        ),
+        "formula_tips": [
+            "L2 TLB miss rate = L2D_TLB_REFILL / L2D_TLB",
+        ],
+        "linux_perf_name": "l2d_tlb",
+        "ai_workload_tips": (
+            "If L2 TLB miss rate is high, huge pages are essential. For "
+            "Graviton3/4 with 48-entry L1 DTLB and 1024-entry L2 TLB, "
+            "2MB pages cover up to 2GB of data TLB-efficiently."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x2F  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "LL_CACHE_RD": {
+        "event_name": "LL_CACHE_RD",
+        "event_number": "0x36",
+        "category": "cache",
+        "description": (
+            "Counts read accesses to the Last Level Cache (LLC / L3). "
+            "These are accesses that missed in L2 and must be serviced "
+            "by the shared LLC. LLC is typically shared across a cluster "
+            "or all cores."
+        ),
+        "when_to_use": (
+            "Profile workloads that exceed per-core L2 capacity. High LLC "
+            "read rate indicates significant off-core memory traffic."
+        ),
+        "formula_tips": [
+            "LLC miss rate = LL_CACHE_MISS_RD / LL_CACHE_RD",
+            "LLC MPKI = LL_CACHE_RD * 1000 / INST_RETIRED",
+        ],
+        "linux_perf_name": "ll_cache_rd",
+        "ai_workload_tips": (
+            "LLC accesses are shared across cores. For multi-threaded ML "
+            "inference, monitor per-core LLC access rates to detect cache "
+            "contention between threads."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x36  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "LL_CACHE_MISS_RD": {
+        "event_name": "LL_CACHE_MISS_RD",
+        "event_number": "0x37",
+        "category": "cache",
+        "description": (
+            "Counts read accesses that miss in the Last Level Cache (LLC). "
+            "These must be serviced from main memory (DRAM), incurring "
+            "the highest latency in the memory hierarchy (100-300+ ns)."
+        ),
+        "when_to_use": (
+            "Profile workloads that are memory-bandwidth-bound. LLC read "
+            "misses directly translate to DRAM traffic and are the most "
+            "expensive cache events."
+        ),
+        "formula_tips": [
+            "LLC miss rate = LL_CACHE_MISS_RD / LL_CACHE_RD",
+            "DRAM bandwidth = LL_CACHE_MISS_RD * 64 / time_seconds",
+            "LLC miss MPKI = LL_CACHE_MISS_RD * 1000 / INST_RETIRED",
+        ],
+        "linux_perf_name": "ll_cache_miss_rd",
+        "ai_workload_tips": (
+            "LLC misses are the dominant cost for large ML models. For "
+            "transformer inference, KV-cache sizes often exceed LLC. "
+            "Consider quantization (INT8/INT4) to reduce memory footprint "
+            "and LLC miss rate."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x37  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "DTLB_WALK": {
+        "event_name": "DTLB_WALK",
+        "event_number": "0x34",
+        "category": "tlb",
+        "description": (
+            "Counts each data-side page table walk. A walk is triggered "
+            "when a data access misses all levels of the data TLB "
+            "hierarchy. Each walk accesses multiple levels of translation "
+            "tables in memory."
+        ),
+        "when_to_use": (
+            "More precise than TLB refill events for measuring page walk "
+            "overhead. Each walk may access 3-4 levels of page tables, "
+            "each requiring a memory access."
+        ),
+        "formula_tips": [
+            "Walk rate = DTLB_WALK / INST_RETIRED",
+            "Walk cost (cycles) = DTLB_WALK * avg_walk_latency",
+            "Compare with L1D_TLB_REFILL to understand TLB hierarchy",
+        ],
+        "linux_perf_name": "dtlb_walk",
+        "ai_workload_tips": (
+            "Page walks are very expensive (100+ cycles each). For ML "
+            "workloads with large memory footprints, DTLB_WALK > 0.1% "
+            "of instructions warrants huge page configuration."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x34  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "ITLB_WALK": {
+        "event_name": "ITLB_WALK",
+        "event_number": "0x35",
+        "category": "tlb",
+        "description": (
+            "Counts each instruction-side page table walk. Triggered when "
+            "an instruction fetch misses all levels of the instruction TLB "
+            "hierarchy. Causes frontend stalls while the walk completes."
+        ),
+        "when_to_use": (
+            "Profile applications with very large instruction footprints "
+            "that cause ITLB misses requiring page walks."
+        ),
+        "formula_tips": [
+            "ITLB walk rate = ITLB_WALK / INST_RETIRED",
+            "Frontend stall contribution = ITLB_WALK * walk_latency / CPU_CYCLES",
+        ],
+        "linux_perf_name": "itlb_walk",
+        "ai_workload_tips": (
+            "Rare in typical ML inference. If observed, indicates extremely "
+            "large code footprint — consider static linking, LTO, or BOLT "
+            "for code layout optimization."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x35  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "OP_RETIRED": {
+        "event_name": "OP_RETIRED",
+        "event_number": "0x3A",
+        "category": "instruction",
+        "description": (
+            "Counts micro-operations (uops) that are architecturally "
+            "retired. A single ARM instruction may decode into multiple "
+            "micro-ops. This counts the actual work completed by the "
+            "processor at the micro-op level."
+        ),
+        "when_to_use": (
+            "Use in TopDown methodology for the Retiring metric. Compare "
+            "with OP_SPEC to measure speculation overhead."
+        ),
+        "formula_tips": [
+            "Retiring (TopDown) = OP_RETIRED / OP_SPEC",
+            "Uops per instruction = OP_RETIRED / INST_RETIRED",
+            "Speculation waste = 1 - (OP_RETIRED / OP_SPEC)",
+        ],
+        "linux_perf_name": "op_retired",
+        "ai_workload_tips": (
+            "Well-optimized ML kernels should show high Retiring ratio "
+            "(OP_RETIRED / OP_SPEC > 0.5). Low retiring ratio means the "
+            "processor is spending cycles on speculated-then-flushed work."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x3A  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "OP_SPEC": {
+        "event_name": "OP_SPEC",
+        "event_number": "0x3B",
+        "category": "instruction",
+        "description": (
+            "Counts micro-operations speculatively executed, including "
+            "those that are later flushed due to branch misprediction "
+            "or other speculation failures. This is the total pipeline "
+            "throughput at the micro-op level."
+        ),
+        "when_to_use": (
+            "Use in TopDown methodology as the total pipeline slots "
+            "denominator. Compare with OP_RETIRED to measure useful vs "
+            "wasted pipeline work."
+        ),
+        "formula_tips": [
+            "Retiring = OP_RETIRED / OP_SPEC",
+            "Bad Speculation = 1 - Frontend_Bound - Backend_Bound - Retiring",
+            "Speculation overhead = (OP_SPEC - OP_RETIRED) / OP_SPEC",
+        ],
+        "linux_perf_name": "op_spec",
+        "ai_workload_tips": (
+            "OP_SPEC significantly exceeding OP_RETIRED indicates bad "
+            "speculation. In ML workloads this is usually from data-dependent "
+            "branches in activation functions or sparse operations."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x3B  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+    "STALL_SLOT": {
+        "event_name": "STALL_SLOT",
+        "event_number": "0x3F",
+        "category": "stall",
+        "description": (
+            "Counts pipeline slot-cycles where no operation is issued. "
+            "This is a more granular version of stall counting that "
+            "accounts for the pipeline width (e.g., 4-wide or 8-wide "
+            "issue). Used in the ARM TopDown methodology."
+        ),
+        "when_to_use": (
+            "Use for detailed TopDown analysis. STALL_SLOT gives a more "
+            "accurate picture than STALL_FRONTEND + STALL_BACKEND on "
+            "wide-issue processors because it accounts for partial stalls."
+        ),
+        "formula_tips": [
+            "Total slots = CPU_CYCLES * pipeline_width",
+            "Stall ratio = STALL_SLOT / (CPU_CYCLES * pipeline_width)",
+            "Useful for TopDown Level 1 decomposition",
+        ],
+        "linux_perf_name": "stall_slot",
+        "ai_workload_tips": (
+            "For detailed performance analysis of ML kernels on Neoverse "
+            "cores, STALL_SLOT provides the highest-fidelity stall metric. "
+            "Combine with STALL_FRONTEND and STALL_BACKEND to classify stalls."
+        ),
+        "register_setup": "MSR PMEVTYPER0_EL0, #0x3F  // Select event\nMSR PMCNTENSET_EL0, #0x01  // Enable counter 0",
+    },
+}
+
+# Build a reverse lookup from event number (hex string) to event name
+_PMU_EVENT_BY_NUMBER: dict[str, str] = {}
+for _name, _data in _PMU_EVENTS.items():
+    _PMU_EVENT_BY_NUMBER[_data["event_number"].upper()] = _name
+
+
+def _format_pmu_event(event: dict) -> str:
+    """Format a single PMU event entry for display."""
+    lines: list[str] = []
+    lines.append(f"# PMU Event: {event['event_name']} ({event['event_number']})")
+    lines.append("")
+    lines.append(f"**Category:** {event['category'].capitalize()}")
+    lines.append(f"**Linux perf:** `perf stat -e {event['linux_perf_name']}`")
+    lines.append("")
+    lines.append("## What It Measures")
+    lines.append(event["description"])
+    lines.append("")
+    lines.append("## When To Use")
+    lines.append(event["when_to_use"])
+    lines.append("")
+    if event["formula_tips"]:
+        lines.append("## Useful Formulas")
+        for tip in event["formula_tips"]:
+            lines.append(f"- {tip}")
+        lines.append("")
+    lines.append("## AI/ML Workload Tips")
+    lines.append(event["ai_workload_tips"])
+    lines.append("")
+    lines.append("## PMU Setup (bare metal)")
+    lines.append("```asm")
+    lines.append(event["register_setup"])
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def _format_pmu_overview() -> str:
+    """Format a table of all PMU events grouped by category."""
+    # Group events by category
+    categories: dict[str, list[dict]] = {}
+    for event in _PMU_EVENTS.values():
+        cat = event["category"]
+        if cat not in categories:
+            categories[cat] = []
+        categories[cat].append(event)
+
+    lines: list[str] = []
+    lines.append("# ARM PMU Events Overview")
+    lines.append("")
+    lines.append(f"Total events: {len(_PMU_EVENTS)}")
+    lines.append("")
+
+    category_order = ["cache", "tlb", "branch", "instruction", "memory", "stall", "misc"]
+    for cat in category_order:
+        if cat not in categories:
+            continue
+        events = sorted(categories[cat], key=lambda e: e["event_number"])
+        lines.append(f"## {cat.capitalize()} Events ({len(events)})")
+        lines.append("")
+        lines.append(f"  {'Event':<28} {'Number':<8} Description")
+        lines.append(f"  {'-----':<28} {'------':<8} -----------")
+        for ev in events:
+            desc = ev["description"]
+            # Truncate description for table
+            if len(desc) > 60:
+                desc = desc[:57] + "..."
+            lines.append(f"  {ev['event_name']:<28} {ev['event_number']:<8} {desc}")
+        lines.append("")
+
+    lines.append("## Usage")
+    lines.append("")
+    lines.append("Query individual events by name: explain_performance_counter('L1D_CACHE_REFILL')")
+    lines.append("Query by hex number: explain_performance_counter('0x03')")
+    lines.append("Query by category: explain_performance_counter('cache')")
+    lines.append("TopDown methodology: explain_performance_counter('topdown')")
+    return "\n".join(lines)
+
+
+def _format_pmu_category(category: str) -> str:
+    """Format all events in a given category."""
+    events = [e for e in _PMU_EVENTS.values() if e["category"] == category]
+    if not events:
+        return f"Error: No events found in category '{category}'."
+
+    events.sort(key=lambda e: e["event_number"])
+    lines: list[str] = []
+    lines.append(f"# PMU Events — {category.capitalize()} Category ({len(events)} events)")
+    lines.append("")
+
+    for ev in events:
+        lines.append(f"## {ev['event_name']} ({ev['event_number']})")
+        lines.append(f"**Linux perf:** `perf stat -e {ev['linux_perf_name']}`")
+        lines.append("")
+        lines.append(ev["description"])
+        lines.append("")
+        lines.append(f"**When to use:** {ev['when_to_use']}")
+        lines.append("")
+        if ev["formula_tips"]:
+            for tip in ev["formula_tips"]:
+                lines.append(f"- {tip}")
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+def _format_topdown_guide() -> str:
+    """Format a TopDown methodology guide using ARM PMU events."""
+    lines: list[str] = []
+    lines.append("# ARM TopDown Performance Analysis Methodology")
+    lines.append("")
+    lines.append("The TopDown methodology classifies CPU pipeline slots into four")
+    lines.append("categories to identify the primary performance bottleneck.")
+    lines.append("")
+    lines.append("## Level 1 Breakdown")
+    lines.append("")
+    lines.append("### Frontend Bound")
+    lines.append("  Formula: Frontend Bound = STALL_FRONTEND / CPU_CYCLES")
+    lines.append("  The frontend cannot deliver instructions fast enough.")
+    lines.append("  Causes: L1I misses, ITLB misses, branch misprediction flushes.")
+    lines.append("  Fix: PGO, LTO, BOLT, reduce code size, improve branch prediction.")
+    lines.append("")
+    lines.append("### Backend Bound")
+    lines.append("  Formula: Backend Bound = STALL_BACKEND / CPU_CYCLES")
+    lines.append("  The backend cannot consume instructions fast enough.")
+    lines.append("  Causes: L1D/L2/LLC misses, DTLB misses, long-latency ops, resource exhaustion.")
+    lines.append("  Fix: Improve data locality, cache tiling, prefetching, reduce memory traffic.")
+    lines.append("")
+    lines.append("### Retiring")
+    lines.append("  Formula: Retiring = OP_RETIRED / OP_SPEC")
+    lines.append("  Fraction of pipeline slots used for useful (retired) work.")
+    lines.append("  High retiring (> 50%) is good — the CPU is doing useful work.")
+    lines.append("  To improve further: vectorize (NEON/SVE), reduce instruction count.")
+    lines.append("")
+    lines.append("### Bad Speculation")
+    lines.append("  Formula: Bad Speculation = 1 - Frontend Bound - Backend Bound - Retiring")
+    lines.append("  Pipeline slots wasted on instructions that are eventually flushed.")
+    lines.append("  Causes: branch mispredictions, memory ordering violations.")
+    lines.append("  Fix: branchless code (CSEL), better branch hints, reduce unpredictable branches.")
+    lines.append("")
+    lines.append("## Suggested perf stat Command")
+    lines.append("")
+    lines.append("```bash")
+    lines.append("perf stat -e cpu_cycles,stall_frontend,stall_backend,op_retired,op_spec,\\")
+    lines.append("inst_retired,br_mis_pred,l1d_cache_refill,l1d_cache,\\")
+    lines.append("l2d_cache_refill,l2d_cache,ll_cache_miss_rd \\")
+    lines.append("-- ./your_workload")
+    lines.append("```")
+    lines.append("")
+    lines.append("## Interpreting Results")
+    lines.append("")
+    lines.append("  1. Compute the four Level-1 categories above.")
+    lines.append("  2. The largest category is your primary bottleneck.")
+    lines.append("  3. Drill down:")
+    lines.append("     - Frontend Bound -> check L1I_CACHE_REFILL, L1I_TLB_REFILL, ITLB_WALK")
+    lines.append("     - Backend Bound  -> check L1D_CACHE_REFILL, L2D_CACHE_REFILL, LL_CACHE_MISS_RD, DTLB_WALK")
+    lines.append("     - Bad Speculation -> check BR_MIS_PRED, BR_MIS_PRED_RETIRED")
+    lines.append("     - Retiring (high) -> vectorize more, use wider SIMD (SVE vs NEON)")
+    lines.append("")
+    lines.append("## ARM-Specific Notes")
+    lines.append("")
+    lines.append("- ARM PMU has limited counters (typically 6 programmable + cycle counter).")
+    lines.append("  You may need to multiplex events across multiple runs.")
+    lines.append("- STALL_SLOT (0x3F) provides slot-level granularity on Neoverse cores.")
+    lines.append("- Some events are micro-architecture specific (Cortex-A78 vs Neoverse V2).")
+    lines.append("- Use `perf stat --topdown` if supported by your kernel and PMU driver.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def explain_performance_counter(event_name: str) -> str:
+    """Look up an ARM PMU (Performance Monitoring Unit) event by name or event number.
+
+    Explains what the event measures, when to use it, useful formulas,
+    AI/ML workload tips, and how to configure the PMU registers.
+
+    Args:
+        event_name: One of:
+            An event name like "L1D_CACHE_REFILL", "CPU_CYCLES", "STALL_BACKEND"
+            A hex event number like "0x03", "0x11"
+            "list" or "overview" -- Summary table of ALL events grouped by category
+            A category name: "cache", "tlb", "branch", "instruction", "memory", "stall", "misc"
+            "topdown" -- ARM TopDown performance analysis methodology guide
+    """
+    key = event_name.strip()
+
+    # Check for "list" or "overview"
+    if key.upper() in ("LIST", "OVERVIEW"):
+        return _format_pmu_overview()
+
+    # Check for "topdown"
+    if key.upper() == "TOPDOWN":
+        return _format_topdown_guide()
+
+    # Check for hex event number (e.g., "0x03")
+    if key.upper().startswith("0X"):
+        hex_key = key.upper()
+        # Normalize to standard format: 0x + uppercase hex digits
+        # Handle variations like "0x3" -> "0x03", "0X03" -> "0X03"
+        try:
+            num = int(hex_key, 16)
+            # Try both "0xNN" formats
+            for fmt in [f"0x{num:02X}", f"0x{num:X}"]:
+                if fmt.upper() in _PMU_EVENT_BY_NUMBER:
+                    name = _PMU_EVENT_BY_NUMBER[fmt.upper()]
+                    return _format_pmu_event(_PMU_EVENTS[name])
+        except ValueError:
+            pass
+        return (
+            f"Error: No PMU event found with number '{event_name}'.\n\n"
+            f"Use 'list' to see all available events and their numbers."
+        )
+
+    # Check for category name
+    categories = {"cache", "tlb", "branch", "instruction", "memory", "stall", "misc"}
+    if key.lower() in categories:
+        return _format_pmu_category(key.lower())
+
+    # Look up by event name (case-insensitive)
+    upper_key = key.upper()
+    if upper_key in _PMU_EVENTS:
+        return _format_pmu_event(_PMU_EVENTS[upper_key])
+
+    # Not found
+    valid_names = ", ".join(sorted(_PMU_EVENTS.keys()))
+    return (
+        f"Error: '{event_name}' is not a recognised PMU event.\n\n"
+        f"Valid event names: {valid_names}\n\n"
+        f"You can also query by:\n"
+        f"  - Hex event number (e.g., '0x03')\n"
+        f"  - Category ('cache', 'tlb', 'branch', 'instruction', 'memory', 'stall', 'misc')\n"
+        f"  - 'list' or 'overview' for all events\n"
+        f"  - 'topdown' for the TopDown methodology guide"
+    )
+
+# ---------------------------------------------------------------------------
+# Tool 18: translate_intrinsic  —  Translate SIMD intrinsics between x86 and ARM
+# ---------------------------------------------------------------------------
+
+_INTRINSIC_TRANSLATIONS: dict[str, dict] = {
+    # === SSE float (128-bit, 4xf32) ===
+    "_mm_add_ps": {
+        "x86_intrinsic": "_mm_add_ps",
+        "x86_instruction": "ADDPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vaddq_f32",
+        "neon_instruction": "FADD Vd.4S, Vn.4S, Vm.4S",
+        "sve_intrinsic": "svadd_f32_x(pg, a, b)",
+        "sve_instruction": "FADD Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "Direct 1:1 translation. Both operate on 4 packed floats.",
+        "porting_tips": "Drop-in replacement. No semantic difference.",
+        "gotchas": "",
+    },
+    "_mm_sub_ps": {
+        "x86_intrinsic": "_mm_sub_ps",
+        "x86_instruction": "SUBPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vsubq_f32",
+        "neon_instruction": "FSUB Vd.4S, Vn.4S, Vm.4S",
+        "sve_intrinsic": "svsub_f32_x(pg, a, b)",
+        "sve_instruction": "FSUB Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "Direct 1:1 translation. Both operate on 4 packed floats.",
+        "porting_tips": "Drop-in replacement. No semantic difference.",
+        "gotchas": "",
+    },
+    "_mm_mul_ps": {
+        "x86_intrinsic": "_mm_mul_ps",
+        "x86_instruction": "MULPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vmulq_f32",
+        "neon_instruction": "FMUL Vd.4S, Vn.4S, Vm.4S",
+        "sve_intrinsic": "svmul_f32_x(pg, a, b)",
+        "sve_instruction": "FMUL Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "Direct 1:1 translation. Both operate on 4 packed floats.",
+        "porting_tips": "Drop-in replacement. No semantic difference.",
+        "gotchas": "",
+    },
+    "_mm_div_ps": {
+        "x86_intrinsic": "_mm_div_ps",
+        "x86_instruction": "DIVPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vdivq_f32",
+        "neon_instruction": "FDIV Vd.4S, Vn.4S, Vm.4S",
+        "sve_intrinsic": "svdiv_f32_x(pg, a, b)",
+        "sve_instruction": "FDIV Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "NEON FDIV is AArch64 only. On AArch32 NEON, use VRECPE+VRECPS for approximate reciprocal then multiply.",
+        "porting_tips": "On AArch64 this is a drop-in replacement. On AArch32 you need a reciprocal approximation sequence.",
+        "gotchas": "AArch32 NEON has no direct divide instruction. vdivq_f32 is only available on AArch64.",
+    },
+    "_mm_sqrt_ps": {
+        "x86_intrinsic": "_mm_sqrt_ps",
+        "x86_instruction": "SQRTPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vsqrtq_f32",
+        "neon_instruction": "FSQRT Vd.4S, Vn.4S",
+        "sve_intrinsic": "svsqrt_f32_x(pg, a)",
+        "sve_instruction": "FSQRT Zd.S, Pg/M, Zn.S",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "NEON FSQRT is AArch64 only. On AArch32, use VRSQRTE+VRSQRTS for approximate inverse sqrt then reciprocal.",
+        "porting_tips": "On AArch64 this is a drop-in replacement.",
+        "gotchas": "AArch32 NEON has no direct sqrt instruction. vsqrtq_f32 is only available on AArch64.",
+    },
+    "_mm_min_ps": {
+        "x86_intrinsic": "_mm_min_ps",
+        "x86_instruction": "MINPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vminq_f32",
+        "neon_instruction": "FMIN Vd.4S, Vn.4S, Vm.4S",
+        "sve_intrinsic": "svmin_f32_x(pg, a, b)",
+        "sve_instruction": "FMIN Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "Direct 1:1 translation. NaN handling may differ slightly between architectures.",
+        "porting_tips": "Drop-in replacement, but verify NaN behaviour if your code relies on NaN propagation.",
+        "gotchas": "SSE MINPS and NEON FMIN differ in NaN handling: SSE returns the second operand if either is NaN, NEON returns NaN.",
+    },
+    "_mm_max_ps": {
+        "x86_intrinsic": "_mm_max_ps",
+        "x86_instruction": "MAXPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vmaxq_f32",
+        "neon_instruction": "FMAX Vd.4S, Vn.4S, Vm.4S",
+        "sve_intrinsic": "svmax_f32_x(pg, a, b)",
+        "sve_instruction": "FMAX Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "Direct 1:1 translation. NaN handling may differ slightly between architectures.",
+        "porting_tips": "Drop-in replacement, but verify NaN behaviour if your code relies on NaN propagation.",
+        "gotchas": "SSE MAXPS and NEON FMAX differ in NaN handling: SSE returns the second operand if either is NaN, NEON returns NaN.",
+    },
+    "_mm_set1_ps": {
+        "x86_intrinsic": "_mm_set1_ps",
+        "x86_instruction": "SHUFPS / MOVSS+SHUFPS (compiler-dependent)",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vdupq_n_f32",
+        "neon_instruction": "DUP Vd.4S, Rn (or from scalar)",
+        "sve_intrinsic": "svdup_f32(a)",
+        "sve_instruction": "DUP Zd.S, Rn (or FDUP for immediate)",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "Broadcast a single float to all lanes. Direct equivalent.",
+        "porting_tips": "Drop-in replacement. vdupq_n_f32(val) broadcasts val to all 4 lanes.",
+        "gotchas": "",
+    },
+    "_mm_load_ps": {
+        "x86_intrinsic": "_mm_load_ps",
+        "x86_instruction": "MOVAPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vld1q_f32",
+        "neon_instruction": "LD1 {Vt.4S}, [Xn]",
+        "sve_intrinsic": "svld1_f32(pg, ptr)",
+        "sve_instruction": "LD1W Zt.S, Pg/Z, [Xn]",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "_mm_load_ps requires 16-byte alignment; vld1q_f32 does not require alignment (though aligned is faster).",
+        "porting_tips": "Drop-in replacement. NEON loads are naturally unaligned, so alignment faults won't occur.",
+        "gotchas": "If using _mm_loadu_ps (unaligned), vld1q_f32 handles both aligned and unaligned.",
+    },
+    "_mm_store_ps": {
+        "x86_intrinsic": "_mm_store_ps",
+        "x86_instruction": "MOVAPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vst1q_f32",
+        "neon_instruction": "ST1 {Vt.4S}, [Xn]",
+        "sve_intrinsic": "svst1_f32(pg, ptr, data)",
+        "sve_instruction": "ST1W Zt.S, Pg, [Xn]",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "_mm_store_ps requires 16-byte alignment; vst1q_f32 does not.",
+        "porting_tips": "Drop-in replacement. NEON stores are naturally unaligned.",
+        "gotchas": "",
+    },
+    "_mm_setzero_ps": {
+        "x86_intrinsic": "_mm_setzero_ps",
+        "x86_instruction": "XORPS (self-XOR idiom)",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vdupq_n_f32(0.0f)",
+        "neon_instruction": "MOVI Vd.4S, #0",
+        "sve_intrinsic": "svdup_f32(0.0f)",
+        "sve_instruction": "FDUP Zd.S, #0.0 (or MOVPRFX+EOR)",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "Set all elements to zero.",
+        "porting_tips": "Use vdupq_n_f32(0.0f). The compiler will typically emit MOVI with zero.",
+        "gotchas": "",
+    },
+    "_mm_cmpeq_ps": {
+        "x86_intrinsic": "_mm_cmpeq_ps",
+        "x86_instruction": "CMPPS (imm=0)",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vceqq_f32",
+        "neon_instruction": "FCMEQ Vd.4S, Vn.4S, Vm.4S",
+        "sve_intrinsic": "svcmpeq_f32(pg, a, b)",
+        "sve_instruction": "FCMEQ Pd.S, Pg/Z, Zn.S, Zm.S",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "Compare for equality. SSE returns bitmask in float lanes, NEON returns bitmask in integer lanes, SVE returns a predicate.",
+        "porting_tips": "Result types differ: SSE returns __m128 with all-ones/all-zeros float lanes, NEON returns uint32x4_t, SVE returns svbool_t.",
+        "gotchas": "Return type differences may require adjustments in surrounding code. NEON result is uint32x4_t, not float32x4_t.",
+    },
+    "_mm_cmpgt_ps": {
+        "x86_intrinsic": "_mm_cmpgt_ps",
+        "x86_instruction": "CMPPS (imm=6, NLT)",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vcgtq_f32",
+        "neon_instruction": "FCMGT Vd.4S, Vn.4S, Vm.4S",
+        "sve_intrinsic": "svcmpgt_f32(pg, a, b)",
+        "sve_instruction": "FCMGT Pd.S, Pg/Z, Zn.S, Zm.S",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "Compare for greater-than. Same return-type differences as cmpeq.",
+        "porting_tips": "Result types differ: SSE returns __m128, NEON returns uint32x4_t, SVE returns svbool_t.",
+        "gotchas": "Return type differences may require adjustments in surrounding code.",
+    },
+    "_mm_and_ps": {
+        "x86_intrinsic": "_mm_and_ps",
+        "x86_instruction": "ANDPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vandq_u32 (reinterpret)",
+        "neon_instruction": "AND Vd.16B, Vn.16B, Vm.16B",
+        "sve_intrinsic": "svand_u32_x(pg, a, b)",
+        "sve_instruction": "AND Zd.D, Zn.D, Zm.D",
+        "data_type": "4x float32 (128-bit), bitwise",
+        "notes": "Bitwise AND. On NEON, you must reinterpret float32x4_t to uint32x4_t first: vandq_u32(vreinterpretq_u32_f32(a), vreinterpretq_u32_f32(b)).",
+        "porting_tips": "Requires vreinterpretq_u32_f32 / vreinterpretq_f32_u32 casts around the operation on NEON.",
+        "gotchas": "NEON bitwise ops work on integer types. You must cast float to uint32 and back.",
+    },
+    "_mm_or_ps": {
+        "x86_intrinsic": "_mm_or_ps",
+        "x86_instruction": "ORPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "vorrq_u32 (reinterpret)",
+        "neon_instruction": "ORR Vd.16B, Vn.16B, Vm.16B",
+        "sve_intrinsic": "svor_u32_x(pg, a, b)",
+        "sve_instruction": "ORR Zd.D, Zn.D, Zm.D",
+        "data_type": "4x float32 (128-bit), bitwise",
+        "notes": "Bitwise OR. On NEON, you must reinterpret float32x4_t to uint32x4_t first.",
+        "porting_tips": "Requires vreinterpretq_u32_f32 / vreinterpretq_f32_u32 casts around the operation on NEON.",
+        "gotchas": "NEON bitwise ops work on integer types. You must cast float to uint32 and back.",
+    },
+    "_mm_xor_ps": {
+        "x86_intrinsic": "_mm_xor_ps",
+        "x86_instruction": "XORPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "veorq_u32 (reinterpret)",
+        "neon_instruction": "EOR Vd.16B, Vn.16B, Vm.16B",
+        "sve_intrinsic": "sveor_u32_x(pg, a, b)",
+        "sve_instruction": "EOR Zd.D, Zn.D, Zm.D",
+        "data_type": "4x float32 (128-bit), bitwise",
+        "notes": "Bitwise XOR. On NEON, you must reinterpret float32x4_t to uint32x4_t first.",
+        "porting_tips": "Requires vreinterpretq_u32_f32 / vreinterpretq_f32_u32 casts around the operation on NEON.",
+        "gotchas": "NEON bitwise ops work on integer types. You must cast float to uint32 and back.",
+    },
+    "_mm_shuffle_ps": {
+        "x86_intrinsic": "_mm_shuffle_ps",
+        "x86_instruction": "SHUFPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "combination of vzip/vuzp/vext/vtbl",
+        "neon_instruction": "TBL Vd.16B, {Vn.16B}, Vm.16B (general case)",
+        "sve_intrinsic": "svtbl_f32(data, indices)",
+        "sve_instruction": "TBL Zd.S, {Zn.S}, Zm.S",
+        "data_type": "4x float32 (128-bit)",
+        "notes": "No single NEON intrinsic matches the full generality of _mm_shuffle_ps. For specific shuffle patterns, simpler instructions (VEXT, VZIP, VUZP, VREV) may suffice. For the general case, use VTBL/TBL.",
+        "porting_tips": "Analyze the shuffle mask (_MM_SHUFFLE(d,c,b,a)) and pick the simplest NEON sequence. Common patterns: reverse = vrev64q_f32, interleave = vzipq_f32, broadcast = vdupq_laneq_f32.",
+        "gotchas": "There is no single NEON equivalent. The replacement depends on the specific shuffle mask. TBL is the general fallback but is slower than specialized permute instructions.",
+        "workaround": (
+            "// General _mm_shuffle_ps replacement using TBL (AArch64 NEON)\n"
+            "// For _mm_shuffle_ps(a, b, _MM_SHUFFLE(d,c,b_idx,a_idx)):\n"
+            "float32x4_t shuffle_example(float32x4_t a, float32x4_t b) {\n"
+            "    // Example: _MM_SHUFFLE(3,2,1,0) from two sources\n"
+            "    // Combine both vectors into a table\n"
+            "    uint8x16_t tbl_a = vreinterpretq_u8_f32(a);\n"
+            "    uint8x16_t tbl_b = vreinterpretq_u8_f32(b);\n"
+            "    // Build index vector (byte indices)\n"
+            "    // Each float32 lane is 4 bytes, so lane N starts at byte N*4\n"
+            "    uint8x16_t idx = {0,1,2,3, 4,5,6,7, 8,9,10,11, 12,13,14,15};\n"
+            "    // For lanes from 'a': indices 0-15, for lanes from 'b': use vqtbl2\n"
+            "    uint8x16x2_t tbl = {tbl_a, tbl_b};\n"
+            "    uint8x16_t result = vqtbl2q_u8(tbl, idx);\n"
+            "    return vreinterpretq_f32_u8(result);\n"
+            "}"
+        ),
+    },
+    "_mm_movemask_ps": {
+        "x86_intrinsic": "_mm_movemask_ps",
+        "x86_instruction": "MOVMSKPS",
+        "x86_extension": "SSE",
+        "neon_intrinsic": "(no direct equivalent)",
+        "neon_instruction": "(multi-instruction sequence)",
+        "sve_intrinsic": "svcompact_f32(pg, data) or svptest_any/svptest_first for predicate queries",
+        "sve_instruction": "COMPACT Zd.S, Pg, Zn.S",
+        "data_type": "4x float32 (128-bit) → 4-bit integer mask",
+        "notes": "Extracts the sign bits of each float lane into an integer bitmask. No single NEON equivalent exists.",
+        "porting_tips": "On NEON, use a shift-and-narrow sequence. On SVE, predicates replace movemask patterns entirely.",
+        "gotchas": "This is one of the hardest SSE intrinsics to port. Often the surrounding algorithm should be restructured to use NEON comparison results (uint32x4_t masks) directly instead of scalar bitmasks.",
+        "workaround": (
+            "// _mm_movemask_ps replacement for AArch64 NEON\n"
+            "// Extracts sign bits of 4 float32 lanes into a 4-bit integer\n"
+            "static inline int vmovemask_f32(float32x4_t v) {\n"
+            "    uint32x4_t mask = vreinterpretq_u32_f32(v);\n"
+            "    // Shift sign bits to bit 0 of each lane\n"
+            "    uint32x4_t shifted = vshrq_n_u32(mask, 31);\n"
+            "    // Pack lanes: lane0*1 + lane1*2 + lane2*4 + lane3*8\n"
+            "    static const uint32_t multipliers[] = {1, 2, 4, 8};\n"
+            "    uint32x4_t mul = vld1q_u32(multipliers);\n"
+            "    uint32x4_t bits = vmulq_u32(shifted, mul);\n"
+            "    return (int)vaddvq_u32(bits);  // AArch64 horizontal add\n"
+            "}\n"
+            "\n"
+            "// Alternative (fewer instructions):\n"
+            "static inline int vmovemask_f32_v2(float32x4_t v) {\n"
+            "    static const int32_t shift_arr[] = {0, 1, 2, 3};\n"
+            "    uint32x4_t mask = vshrq_n_u32(vreinterpretq_u32_f32(v), 31);\n"
+            "    int32x4_t shift = vld1q_s32(shift_arr);\n"
+            "    uint32x4_t shifted = vshlq_u32(mask, shift);\n"
+            "    return (int)vaddvq_u32(shifted);\n"
+            "}"
+        ),
+    },
+    # === SSE2 integer (128-bit, 4xi32 or 16xi8) ===
+    "_mm_add_epi32": {
+        "x86_intrinsic": "_mm_add_epi32",
+        "x86_instruction": "PADDD",
+        "x86_extension": "SSE2",
+        "neon_intrinsic": "vaddq_s32",
+        "neon_instruction": "ADD Vd.4S, Vn.4S, Vm.4S",
+        "sve_intrinsic": "svadd_s32_x(pg, a, b)",
+        "sve_instruction": "ADD Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "4x int32 (128-bit)",
+        "notes": "Direct 1:1 translation. Both operate on 4 packed 32-bit integers.",
+        "porting_tips": "Drop-in replacement. No semantic difference.",
+        "gotchas": "",
+    },
+    "_mm_sub_epi32": {
+        "x86_intrinsic": "_mm_sub_epi32",
+        "x86_instruction": "PSUBD",
+        "x86_extension": "SSE2",
+        "neon_intrinsic": "vsubq_s32",
+        "neon_instruction": "SUB Vd.4S, Vn.4S, Vm.4S",
+        "sve_intrinsic": "svsub_s32_x(pg, a, b)",
+        "sve_instruction": "SUB Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "4x int32 (128-bit)",
+        "notes": "Direct 1:1 translation. Both operate on 4 packed 32-bit integers.",
+        "porting_tips": "Drop-in replacement. No semantic difference.",
+        "gotchas": "",
+    },
+    "_mm_mullo_epi32": {
+        "x86_intrinsic": "_mm_mullo_epi32",
+        "x86_instruction": "PMULLD",
+        "x86_extension": "SSE4.1",
+        "neon_intrinsic": "vmulq_s32",
+        "neon_instruction": "MUL Vd.4S, Vn.4S, Vm.4S",
+        "sve_intrinsic": "svmul_s32_x(pg, a, b)",
+        "sve_instruction": "MUL Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "4x int32 (128-bit)",
+        "notes": "Low-half 32-bit multiply. Direct 1:1 translation.",
+        "porting_tips": "Drop-in replacement. Both return the low 32 bits of each 32x32 product.",
+        "gotchas": "",
+    },
+    "_mm_and_si128": {
+        "x86_intrinsic": "_mm_and_si128",
+        "x86_instruction": "PAND",
+        "x86_extension": "SSE2",
+        "neon_intrinsic": "vandq_u32",
+        "neon_instruction": "AND Vd.16B, Vn.16B, Vm.16B",
+        "sve_intrinsic": "svand_u32_x(pg, a, b)",
+        "sve_instruction": "AND Zd.D, Zn.D, Zm.D",
+        "data_type": "128-bit integer, bitwise",
+        "notes": "Bitwise AND on 128-bit integer vectors. Direct equivalent.",
+        "porting_tips": "Drop-in replacement. Both operate on the full 128-bit register.",
+        "gotchas": "",
+    },
+    "_mm_or_si128": {
+        "x86_intrinsic": "_mm_or_si128",
+        "x86_instruction": "POR",
+        "x86_extension": "SSE2",
+        "neon_intrinsic": "vorrq_u32",
+        "neon_instruction": "ORR Vd.16B, Vn.16B, Vm.16B",
+        "sve_intrinsic": "svor_u32_x(pg, a, b)",
+        "sve_instruction": "ORR Zd.D, Zn.D, Zm.D",
+        "data_type": "128-bit integer, bitwise",
+        "notes": "Bitwise OR on 128-bit integer vectors. Direct equivalent.",
+        "porting_tips": "Drop-in replacement.",
+        "gotchas": "",
+    },
+    "_mm_slli_epi32": {
+        "x86_intrinsic": "_mm_slli_epi32",
+        "x86_instruction": "PSLLD",
+        "x86_extension": "SSE2",
+        "neon_intrinsic": "vshlq_n_s32",
+        "neon_instruction": "SHL Vd.4S, Vn.4S, #imm",
+        "sve_intrinsic": "svlsl_n_s32_x(pg, a, imm)",
+        "sve_instruction": "LSL Zd.S, Pg/M, Zn.S, #imm",
+        "data_type": "4x int32 (128-bit)",
+        "notes": "Left shift each 32-bit lane by immediate. Direct equivalent.",
+        "porting_tips": "Drop-in replacement. Shift amount must be an immediate (compile-time constant).",
+        "gotchas": "NEON vshlq_n_s32 requires an immediate shift amount (0-31). For variable shifts, use vshlq_s32 with a shift vector.",
+    },
+    "_mm_srli_epi32": {
+        "x86_intrinsic": "_mm_srli_epi32",
+        "x86_instruction": "PSRLD",
+        "x86_extension": "SSE2",
+        "neon_intrinsic": "vshrq_n_u32",
+        "neon_instruction": "USHR Vd.4S, Vn.4S, #imm",
+        "sve_intrinsic": "svlsr_n_u32_x(pg, a, imm)",
+        "sve_instruction": "LSR Zd.S, Pg/M, Zn.S, #imm",
+        "data_type": "4x uint32 (128-bit)",
+        "notes": "Logical (unsigned) right shift each 32-bit lane by immediate.",
+        "porting_tips": "Drop-in replacement. Use unsigned type (uint32x4_t) to get logical (not arithmetic) shift.",
+        "gotchas": "NEON vshrq_n_u32 shift amount must be 1-32 (not 0). For shift by 0, use the input directly.",
+    },
+    "_mm_cmpeq_epi32": {
+        "x86_intrinsic": "_mm_cmpeq_epi32",
+        "x86_instruction": "PCMPEQD",
+        "x86_extension": "SSE2",
+        "neon_intrinsic": "vceqq_s32",
+        "neon_instruction": "CMEQ Vd.4S, Vn.4S, Vm.4S",
+        "sve_intrinsic": "svcmpeq_s32(pg, a, b)",
+        "sve_instruction": "CMPEQ Pd.S, Pg/Z, Zn.S, Zm.S",
+        "data_type": "4x int32 (128-bit)",
+        "notes": "Compare for equality. SSE and NEON both return all-ones / all-zeros per lane. SVE returns a predicate.",
+        "porting_tips": "Drop-in replacement for NEON. SVE returns svbool_t which may require code restructuring.",
+        "gotchas": "",
+    },
+    "_mm_set1_epi32": {
+        "x86_intrinsic": "_mm_set1_epi32",
+        "x86_instruction": "MOVD+PSHUFD (compiler-dependent)",
+        "x86_extension": "SSE2",
+        "neon_intrinsic": "vdupq_n_s32",
+        "neon_instruction": "DUP Vd.4S, Wn",
+        "sve_intrinsic": "svdup_s32(a)",
+        "sve_instruction": "DUP Zd.S, Wn",
+        "data_type": "4x int32 (128-bit)",
+        "notes": "Broadcast a single int32 to all lanes. Direct equivalent.",
+        "porting_tips": "Drop-in replacement.",
+        "gotchas": "",
+    },
+    # === AVX (256-bit, 8xf32) ===
+    "_mm256_add_ps": {
+        "x86_intrinsic": "_mm256_add_ps",
+        "x86_instruction": "VADDPS (ymm)",
+        "x86_extension": "AVX",
+        "neon_intrinsic": "2x vaddq_f32 (split into high/low)",
+        "neon_instruction": "FADD Vd.4S, Vn.4S, Vm.4S (x2)",
+        "sve_intrinsic": "svadd_f32_x(pg, a, b)",
+        "sve_instruction": "FADD Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "8x float32 (256-bit)",
+        "notes": "NEON is 128-bit, so 256-bit AVX ops require two NEON operations on high and low halves. SVE with VL>=256 can handle this in one instruction.",
+        "porting_tips": "Split into two 128-bit operations: result_lo = vaddq_f32(a_lo, b_lo); result_hi = vaddq_f32(a_hi, b_hi);",
+        "gotchas": "NEON requires splitting 256-bit data into two 128-bit halves. Data layout must be managed carefully.",
+    },
+    "_mm256_mul_ps": {
+        "x86_intrinsic": "_mm256_mul_ps",
+        "x86_instruction": "VMULPS (ymm)",
+        "x86_extension": "AVX",
+        "neon_intrinsic": "2x vmulq_f32 (split into high/low)",
+        "neon_instruction": "FMUL Vd.4S, Vn.4S, Vm.4S (x2)",
+        "sve_intrinsic": "svmul_f32_x(pg, a, b)",
+        "sve_instruction": "FMUL Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "8x float32 (256-bit)",
+        "notes": "NEON is 128-bit, so split into two 128-bit multiply operations. SVE with VL>=256 handles this natively.",
+        "porting_tips": "Split into two 128-bit operations: result_lo = vmulq_f32(a_lo, b_lo); result_hi = vmulq_f32(a_hi, b_hi);",
+        "gotchas": "NEON requires splitting 256-bit data into two 128-bit halves.",
+    },
+    "_mm256_load_ps": {
+        "x86_intrinsic": "_mm256_load_ps",
+        "x86_instruction": "VMOVAPS (ymm)",
+        "x86_extension": "AVX",
+        "neon_intrinsic": "2x vld1q_f32 (sequential loads)",
+        "neon_instruction": "LD1 {Vt.4S}, [Xn] (x2, with offset)",
+        "sve_intrinsic": "svld1_f32(pg, ptr)",
+        "sve_instruction": "LD1W Zt.S, Pg/Z, [Xn]",
+        "data_type": "8x float32 (256-bit)",
+        "notes": "Load 256 bits (8 floats). NEON needs two 128-bit loads. SVE with VL>=256 does one load.",
+        "porting_tips": "float32x4_t lo = vld1q_f32(ptr); float32x4_t hi = vld1q_f32(ptr + 4);",
+        "gotchas": "Ensure pointer arithmetic accounts for the split: second load at ptr+4 (not ptr+16 bytes, since pointer is float*).",
+    },
+    "_mm256_store_ps": {
+        "x86_intrinsic": "_mm256_store_ps",
+        "x86_instruction": "VMOVAPS (ymm)",
+        "x86_extension": "AVX",
+        "neon_intrinsic": "2x vst1q_f32 (sequential stores)",
+        "neon_instruction": "ST1 {Vt.4S}, [Xn] (x2, with offset)",
+        "sve_intrinsic": "svst1_f32(pg, ptr, data)",
+        "sve_instruction": "ST1W Zt.S, Pg, [Xn]",
+        "data_type": "8x float32 (256-bit)",
+        "notes": "Store 256 bits (8 floats). NEON needs two 128-bit stores. SVE with VL>=256 does one store.",
+        "porting_tips": "vst1q_f32(ptr, lo); vst1q_f32(ptr + 4, hi);",
+        "gotchas": "",
+    },
+    "_mm256_set1_ps": {
+        "x86_intrinsic": "_mm256_set1_ps",
+        "x86_instruction": "VBROADCASTSS (ymm)",
+        "x86_extension": "AVX",
+        "neon_intrinsic": "2x vdupq_n_f32",
+        "neon_instruction": "DUP Vd.4S, Rn (x2)",
+        "sve_intrinsic": "svdup_f32(a)",
+        "sve_instruction": "DUP Zd.S, Rn",
+        "data_type": "8x float32 (256-bit)",
+        "notes": "Broadcast scalar to all 8 lanes. On NEON, broadcast into two 128-bit registers.",
+        "porting_tips": "float32x4_t v = vdupq_n_f32(val); — use the same register for both halves.",
+        "gotchas": "",
+    },
+    "_mm256_fmadd_ps": {
+        "x86_intrinsic": "_mm256_fmadd_ps",
+        "x86_instruction": "VFMADD132PS / VFMADD213PS / VFMADD231PS (ymm)",
+        "x86_extension": "FMA (AVX2)",
+        "neon_intrinsic": "2x vfmaq_f32 (split into high/low)",
+        "neon_instruction": "FMLA Vd.4S, Vn.4S, Vm.4S (x2)",
+        "sve_intrinsic": "svmla_f32_x(pg, acc, a, b)",
+        "sve_instruction": "FMLA Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "8x float32 (256-bit)",
+        "notes": "Fused multiply-add: a*b+c. NEON vfmaq_f32 computes acc + a*b (note operand order difference). SVE svmla computes acc + a*b.",
+        "porting_tips": "_mm256_fmadd_ps(a,b,c) = a*b+c. vfmaq_f32(c, a, b) = c + a*b. Same result, different argument order.",
+        "gotchas": "Operand order differs! x86 FMA: fmadd(a,b,c) = a*b+c. NEON FMA: vfmaq_f32(acc,a,b) = acc+a*b. The accumulator is the FIRST argument in NEON.",
+    },
+    # === AVX-512 (512-bit, 16xf32) ===
+    "_mm512_add_ps": {
+        "x86_intrinsic": "_mm512_add_ps",
+        "x86_instruction": "VADDPS (zmm)",
+        "x86_extension": "AVX-512F",
+        "neon_intrinsic": "4x vaddq_f32 (split into 4 quarters)",
+        "neon_instruction": "FADD Vd.4S, Vn.4S, Vm.4S (x4)",
+        "sve_intrinsic": "svadd_f32_x(pg, a, b)",
+        "sve_instruction": "FADD Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "16x float32 (512-bit)",
+        "notes": "NEON is 128-bit, so 512-bit AVX-512 ops require four NEON operations. SVE with VL>=512 can handle this in one instruction.",
+        "porting_tips": "Split into four 128-bit operations on quarters. SVE is a much better target for AVX-512 code.",
+        "gotchas": "Four-way split on NEON is cumbersome. Consider SVE or restructuring the algorithm for 128-bit vectors.",
+    },
+    "_mm512_mask_add_ps": {
+        "x86_intrinsic": "_mm512_mask_add_ps",
+        "x86_instruction": "VADDPS (zmm) {k}",
+        "x86_extension": "AVX-512F",
+        "neon_intrinsic": "(manual masking with vbslq_f32)",
+        "neon_instruction": "BSL Vd.16B, Vn.16B, Vm.16B + FADD (multi-instruction)",
+        "sve_intrinsic": "svadd_f32_m(pg, a, b)",
+        "sve_instruction": "FADD Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "16x float32 (512-bit), masked",
+        "notes": "Masked add: only lanes where mask bit is set are updated. SVE predication (_m suffix) is a natural fit. NEON requires manual masking with vbslq_f32.",
+        "porting_tips": "SVE: use _m (merging) predication. NEON: compute add, then blend: vbslq_f32(mask, add_result, passthrough).",
+        "gotchas": "NEON masking is more verbose. SVE predicated operations are the natural equivalent of AVX-512 masking.",
+        "workaround": (
+            "// _mm512_mask_add_ps replacement for NEON (per 128-bit quarter)\n"
+            "// mask_add(src, k, a, b): result[i] = k[i] ? a[i]+b[i] : src[i]\n"
+            "float32x4_t neon_mask_add(float32x4_t src, uint32x4_t mask,\n"
+            "                          float32x4_t a, float32x4_t b) {\n"
+            "    float32x4_t sum = vaddq_f32(a, b);\n"
+            "    return vbslq_f32(mask, sum, src);  // select sum where mask, else src\n"
+            "}"
+        ),
+    },
+    "_mm512_fmadd_ps": {
+        "x86_intrinsic": "_mm512_fmadd_ps",
+        "x86_instruction": "VFMADD132PS / VFMADD213PS / VFMADD231PS (zmm)",
+        "x86_extension": "AVX-512F",
+        "neon_intrinsic": "4x vfmaq_f32 (split into 4 quarters)",
+        "neon_instruction": "FMLA Vd.4S, Vn.4S, Vm.4S (x4)",
+        "sve_intrinsic": "svmla_f32_x(pg, acc, a, b)",
+        "sve_instruction": "FMLA Zd.S, Pg/M, Zn.S, Zm.S",
+        "data_type": "16x float32 (512-bit)",
+        "notes": "Fused multiply-add on 512 bits. Same operand order caveat as the 256-bit version.",
+        "porting_tips": "Split into four 128-bit FMA operations on NEON. SVE with VL>=512 handles natively.",
+        "gotchas": "Operand order differs! x86 FMA: fmadd(a,b,c) = a*b+c. NEON FMA: vfmaq_f32(acc,a,b) = acc+a*b.",
+    },
+}
+
+# Reverse-lookup index: ARM intrinsic name → x86 intrinsic key
+_ARM_TO_X86_INDEX: dict[str, str] = {}
+for _x86_key, _entry in _INTRINSIC_TRANSLATIONS.items():
+    # Index NEON intrinsic names (strip parenthetical notes and whitespace)
+    _neon = _entry["neon_intrinsic"]
+    # Handle entries like "2x vaddq_f32 (split into high/low)" or "vandq_u32 (reinterpret)"
+    for _token in _neon.replace(",", " ").split():
+        _clean = _token.strip("()")
+        if _clean.startswith("v") and len(_clean) > 2 and _clean[1:2].isalpha():
+            _ARM_TO_X86_INDEX[_clean.lower()] = _x86_key
+    # Index SVE intrinsic names (take function name before parenthesis)
+    _sve = _entry["sve_intrinsic"]
+    _sve_name = _sve.split("(")[0].strip()
+    if _sve_name.startswith("sv"):
+        _ARM_TO_X86_INDEX[_sve_name.lower()] = _x86_key
+
+# Clean up loop variables from module scope
+del _x86_key, _entry, _neon, _token, _clean, _sve, _sve_name
+
+
+def _format_intrinsic_translation(entry: dict, target_arch: str) -> str:
+    """Format a single intrinsic translation entry."""
+    x86 = entry["x86_intrinsic"]
+    ext = entry["x86_extension"]
+
+    if target_arch in ("neon", "sve"):
+        neon_intr = entry["neon_intrinsic"]
+        # Build the header
+        header = f"# Intrinsic Translation: {x86} → {neon_intr}"
+        if target_arch == "sve":
+            sve_name = entry["sve_intrinsic"].split("(")[0].strip()
+            header = f"# Intrinsic Translation: {x86} → {sve_name}"
+    else:
+        # x86 target (reverse direction)
+        # Determine which ARM intrinsic was the source
+        header = f"# Intrinsic Translation: (ARM) → {x86}"
+
+    lines = [header, ""]
+
+    # x86 section
+    lines.append(f"## x86 ({ext})")
+    lines.append(f"**Intrinsic:** `{x86}`")
+    lines.append(f"**Instruction:** {entry['x86_instruction']}")
+    lines.append("")
+
+    # NEON section
+    lines.append("## ARM NEON Equivalent")
+    lines.append(f"**Intrinsic:** `{entry['neon_intrinsic']}`")
+    lines.append(f"**Instruction:** {entry['neon_instruction']}")
+    lines.append("")
+
+    # SVE section
+    lines.append("## ARM SVE Equivalent")
+    lines.append(f"**Intrinsic:** `{entry['sve_intrinsic']}`")
+    lines.append(f"**Instruction:** {entry['sve_instruction']}")
+    lines.append("")
+
+    # Data type
+    lines.append("## Data Type")
+    lines.append(entry["data_type"])
+    lines.append("")
+
+    # Porting notes
+    lines.append("## Porting Notes")
+    lines.append(entry["porting_tips"])
+    lines.append("")
+
+    # Gotchas
+    lines.append("## Gotchas")
+    gotchas = entry.get("gotchas", "")
+    lines.append(gotchas if gotchas else "None — direct translation.")
+    lines.append("")
+
+    # Workaround (if present)
+    workaround = entry.get("workaround", "")
+    if workaround:
+        lines.append("## Workaround Code")
+        lines.append("```c")
+        lines.append(workaround)
+        lines.append("```")
+        lines.append("")
+
+    # Extra notes
+    if entry.get("notes"):
+        lines.append("## Additional Notes")
+        lines.append(entry["notes"])
+
+    return "\n".join(lines)
+
+
+def _format_intrinsic_overview(target_arch: str) -> str:
+    """Format an overview table of all intrinsic translations."""
+    # Group by x86 extension
+    groups: dict[str, list[dict]] = {}
+    for entry in _INTRINSIC_TRANSLATIONS.values():
+        ext = entry["x86_extension"]
+        groups.setdefault(ext, []).append(entry)
+
+    lines = ["# SIMD Intrinsic Translation Overview", ""]
+    if target_arch in ("neon", "sve"):
+        lines.append(f"x86 → ARM {target_arch.upper()} translation table")
+    else:
+        lines.append(f"ARM → x86 translation table")
+    lines.append("")
+
+    for ext in ("SSE", "SSE2", "SSE4.1", "AVX", "FMA (AVX2)", "AVX-512F"):
+        if ext not in groups:
+            continue
+        entries = groups[ext]
+        lines.append(f"## {ext}")
+        lines.append("")
+        if target_arch == "neon":
+            lines.append(f"| x86 Intrinsic | NEON Equivalent | Data Type |")
+            lines.append(f"|---|---|---|")
+            for e in entries:
+                lines.append(f"| `{e['x86_intrinsic']}` | `{e['neon_intrinsic']}` | {e['data_type']} |")
+        elif target_arch == "sve":
+            lines.append(f"| x86 Intrinsic | SVE Equivalent | Data Type |")
+            lines.append(f"|---|---|---|")
+            for e in entries:
+                sve_name = e["sve_intrinsic"].split("(")[0].strip()
+                lines.append(f"| `{e['x86_intrinsic']}` | `{sve_name}` | {e['data_type']} |")
+        else:
+            lines.append(f"| x86 Intrinsic | NEON Equivalent | SVE Equivalent |")
+            lines.append(f"|---|---|---|")
+            for e in entries:
+                sve_name = e["sve_intrinsic"].split("(")[0].strip()
+                lines.append(f"| `{e['x86_intrinsic']}` | `{e['neon_intrinsic']}` | `{sve_name}` |")
+        lines.append("")
+
+    lines.append(f"**Total translations:** {len(_INTRINSIC_TRANSLATIONS)}")
+    return "\n".join(lines)
+
+
+def _find_closest_intrinsics(name: str, limit: int = 5) -> list[str]:
+    """Find intrinsic names that are close to the given name."""
+    name_lower = name.lower()
+    all_names = list(_INTRINSIC_TRANSLATIONS.keys()) + list(_ARM_TO_X86_INDEX.keys())
+    # Simple substring matching for suggestions
+    matches = []
+    for candidate in all_names:
+        if name_lower in candidate.lower() or candidate.lower() in name_lower:
+            matches.append(candidate)
+    # Also try prefix matching
+    if not matches:
+        for candidate in all_names:
+            # Check if they share a common prefix of length >= 6
+            c_lower = candidate.lower()
+            prefix_len = 0
+            for a, b in zip(name_lower, c_lower):
+                if a == b:
+                    prefix_len += 1
+                else:
+                    break
+            if prefix_len >= 6:
+                matches.append(candidate)
+    # Deduplicate and limit
+    seen = set()
+    unique = []
+    for m in matches:
+        if m not in seen:
+            seen.add(m)
+            unique.append(m)
+    return unique[:limit]
+
+
+@mcp.tool()
+def translate_intrinsic(intrinsic: str, from_arch: str, to_arch: str) -> str:
+    """Translate SIMD intrinsics between x86 (SSE/AVX) and ARM (NEON/SVE).
+
+    Invaluable for porting code between x86 and ARM architectures. Covers
+    SSE, SSE2, AVX, AVX-512 on the x86 side and NEON, SVE on the ARM side.
+
+    Args:
+        intrinsic: The intrinsic function name (e.g. "_mm_add_ps", "vaddq_f32"),
+            or "list"/"overview" to see all available translations.
+        from_arch: Source architecture. One of:
+            "x86", "sse", "avx", "avx2", "avx512" — x86 SIMD
+            "neon" — ARM NEON
+            "sve" — ARM SVE
+        to_arch: Target architecture. One of:
+            "neon" — ARM NEON
+            "sve" — ARM SVE
+            "sse", "avx", "x86" — x86 SIMD
+    """
+    valid_from = {"x86", "sse", "avx", "avx2", "avx512", "neon", "sve"}
+    valid_to = {"neon", "sve", "sse", "avx", "x86"}
+
+    from_key = from_arch.strip().lower()
+    to_key = to_arch.strip().lower()
+
+    if from_key not in valid_from:
+        return (
+            f"Error: '{from_arch}' is not a valid source architecture.\n\n"
+            f"Valid values: {', '.join(sorted(valid_from))}"
+        )
+
+    if to_key not in valid_to:
+        return (
+            f"Error: '{to_arch}' is not a valid target architecture.\n\n"
+            f"Valid values: {', '.join(sorted(valid_to))}"
+        )
+
+    name = intrinsic.strip()
+    name_lower = name.lower()
+
+    # Handle overview / list request
+    if name_lower in ("list", "overview"):
+        return _format_intrinsic_overview(to_key)
+
+    # Normalize from_arch to determine lookup direction
+    x86_archs = {"x86", "sse", "avx", "avx2", "avx512"}
+    arm_archs = {"neon", "sve"}
+
+    if from_key in x86_archs:
+        # x86 → ARM lookup
+        entry = _INTRINSIC_TRANSLATIONS.get(name_lower)
+        if entry is None:
+            # Try case-insensitive search
+            for key, val in _INTRINSIC_TRANSLATIONS.items():
+                if key.lower() == name_lower:
+                    entry = val
+                    break
+
+        if entry is None:
+            suggestions = _find_closest_intrinsics(name)
+            msg = f"Error: intrinsic '{name}' not found in translation database.\n\n"
+            if suggestions:
+                msg += "Did you mean one of these?\n"
+                for s in suggestions:
+                    msg += f"  - {s}\n"
+            else:
+                msg += "Use translate_intrinsic('list', ...) to see all available translations.\n"
+            return msg
+
+        return _format_intrinsic_translation(entry, to_key)
+
+    elif from_key in arm_archs:
+        # ARM → x86 lookup (reverse direction)
+        x86_key = _ARM_TO_X86_INDEX.get(name_lower)
+        if x86_key is None:
+            # Try case-insensitive search in the index
+            for arm_name, x86_k in _ARM_TO_X86_INDEX.items():
+                if arm_name.lower() == name_lower:
+                    x86_key = x86_k
+                    break
+
+        if x86_key is None:
+            suggestions = _find_closest_intrinsics(name)
+            msg = f"Error: ARM intrinsic '{name}' not found in translation database.\n\n"
+            if suggestions:
+                msg += "Did you mean one of these?\n"
+                for s in suggestions:
+                    msg += f"  - {s}\n"
+            else:
+                msg += "Use translate_intrinsic('list', ...) to see all available translations.\n"
+            return msg
+
+        entry = _INTRINSIC_TRANSLATIONS[x86_key]
+        # For reverse direction, target is x86
+        return _format_intrinsic_translation(entry, to_key)
+
+    return f"Error: unsupported translation direction from '{from_arch}' to '{to_arch}'."
 
 def main():
     mcp.run()

@@ -1,6 +1,6 @@
 # ARM Register Reference MCP
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that gives AI assistants instant access to ARM architecture reference data. It covers **AArch32** (ARMv7) and **AArch64** (ARMv8/v9) with 17 tools spanning registers, instruction decoding, condition codes, calling conventions, exception levels, security models, page tables, memory attributes, architecture extensions, assembly patterns, memory barriers, and core/IP reference -- all without leaving your editor or CLI.
+A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that gives AI assistants instant access to ARM architecture reference data. It covers **AArch32** (ARMv7) and **AArch64** (ARMv8/v9) with 23 tools spanning registers, instruction decoding, condition codes, calling conventions, exception levels, security models, page tables, memory attributes, architecture extensions, assembly patterns, memory barriers, core/IP reference, NEON/ASIMD intrinsics, SME tile operations, optimization suggestions, system registers, PMU events, and x86-to-ARM intrinsic translation -- all without leaving your editor or CLI.
 
 Built in Python. Works with any MCP-compatible client over stdio transport.
 
@@ -8,7 +8,7 @@ Built in Python. Works with any MCP-compatible client over stdio transport.
 
 ## Tools
 
-The server exposes **17 tools** organized into five categories:
+The server exposes **23 tools** organized into six categories:
 
 ### Register tools
 
@@ -52,6 +52,17 @@ The server exposes **17 tools** organized into five categories:
 | `show_assembly_pattern` | Annotated assembly for common ARM patterns | `show_assembly_pattern("spinlock_acquire", architecture="aarch64")` |
 | `explain_barrier` | Memory barrier and synchronization instruction reference | `explain_barrier("DMB")`, `explain_barrier("LDAR")` |
 
+### SIMD, optimization & porting tools
+
+| Tool | Description | Example Input |
+|------|-------------|---------------|
+| `explain_neon_intrinsic` | NEON/ASIMD intrinsic reference with instruction, types, latency, and usage example | `explain_neon_intrinsic("vfmaq_f32")`, `explain_neon_intrinsic("vld1q_f32")` |
+| `explain_sme_tile` | SME tile operations, ZA storage, streaming SVE mode, outer products | `explain_sme_tile("outer_product")`, `explain_sme_tile("za_storage")` |
+| `suggest_optimization` | ARM-specific optimization suggestions for code patterns | `suggest_optimization("matrix_multiply", target_core="cortex-a78")` |
+| `lookup_system_register` | Full AArch64 system register reference (beyond the basic set) | `lookup_system_register("TCR_EL1")`, `lookup_system_register("list", el="EL1")` |
+| `explain_performance_counter` | ARM PMU performance counter event reference | `explain_performance_counter("L1D_CACHE_REFILL")`, `explain_performance_counter("topdown")` |
+| `translate_intrinsic` | Translate between x86 SSE/AVX and ARM NEON/SVE intrinsics | `translate_intrinsic("_mm_add_ps", "x86", "neon")` |
+
 ### Tool details
 
 **`lookup_register(name, architecture?)`** -- Returns the register's bit width, architecture, category, description, bit field layout (if any), and usage notes. Supports aliases (e.g., `FP`, `LR`, `IP0`, `WZR`). If `architecture` is omitted, matches from both AArch32 and AArch64 are returned.
@@ -87,6 +98,18 @@ The server exposes **17 tools** organized into five categories:
 **`show_assembly_pattern(pattern_name, architecture?)`** -- Returns annotated assembly code for 12 common ARM patterns: function_prologue, function_epilogue, atomic_add, atomic_cas, spinlock_acquire, spinlock_release, context_switch, syscall, tlb_invalidate, cache_clean, enable_mmu, exception_vector. Available for both AArch32 and AArch64.
 
 **`explain_barrier(barrier_type)`** -- Explains an ARM barrier or synchronization instruction: DMB, DSB, ISB, LDAR, STLR, LDAPR, CAS/CASA/CASAL, SB, CSDB, SSBB/PSSBB. Covers ordering semantics, domain options, acquire/release patterns, and Spectre mitigation barriers. Pass `"overview"` for a summary of all barrier types.
+
+**`explain_neon_intrinsic(intrinsic_name)`** -- Looks up an ARM NEON/Advanced SIMD intrinsic by name (e.g., `vfmaq_f32`, `vaddq_f32`, `vld1q_f32`). Returns the C signature, equivalent AArch64 instruction, data types, category, architecture compatibility, estimated latency and throughput, and a usage example. Pass `"list"` to see all 40+ available intrinsics grouped by category. Critical for AI/ML inference kernel development.
+
+**`explain_sme_tile(operation)`** -- Reference for ARM's Scalable Matrix Extension (SME). Topics include `overview`, `za_storage` (ZA tile register), `outer_product` (FMOPA/FMOPS), `streaming_mode` (SMSTART/SMSTOP), `sme2` (SME2 enhancements), `programming_model`, `tile_load_store`, `mopa_fmopa`, `data_types`, and `compatibility`. Each topic covers architecture concepts, key instructions, code examples, and practical guidance.
+
+**`suggest_optimization(code_pattern, target_core?)`** -- Given a code pattern (e.g., `"matrix_multiply"`, `"memcpy"`, `"dot_product"`, `"sort"`, `"hash"`), suggests ARM-specific optimizations: NEON vectorization, SVE scalable loops, cache-friendly tiling, LSE atomics, and more. Optionally accepts a target core for core-specific recommendations. Pass `"list"` for all patterns.
+
+**`lookup_system_register(register, el?)`** -- Expanded AArch64 system register reference covering the full register space. Look up individual registers (e.g., `TCR_EL1`, `HCR_EL2`, `MAIR_EL1`) or browse by category with special queries: `"list"` (all registers), `"memory"` (MMU/translation), `"timer"` (generic timer), `"id"` (identification), `"perf"` (performance monitoring). Optional `el` filter restricts to a specific exception level.
+
+**`explain_performance_counter(event_name)`** -- ARM PMU event reference. Look up performance monitoring events by name (e.g., `L1D_CACHE_REFILL`, `CPU_CYCLES`, `STALL_FRONTEND`) or by hex event number (e.g., `0x03`). Returns what the event measures, when to use it, useful formulas, Linux perf command, AI/ML workload tips, and PMU register setup. Pass `"topdown"` for the ARM Top-Down methodology guide, `"list"` for all events, or a category name (e.g., `"cache"`) to filter.
+
+**`translate_intrinsic(intrinsic, from_arch, to_arch)`** -- Translates between x86 SSE/AVX intrinsics and ARM NEON/SVE equivalents. Supports both directions: x86-to-ARM (`_mm_add_ps` -> `vaddq_f32`) and ARM-to-x86 (`vaddq_f32` -> `_mm_add_ps`). Shows the instruction mapping, data types, porting tips, and gotchas (e.g., operand order differences for FMA). Covers SSE, SSE2, AVX, AVX2, and AVX-512 intrinsics. Pass `"list"` to see all available translations.
 
 ---
 
@@ -126,7 +149,7 @@ pip install -e .
 claude mcp add --transport stdio arm-reference -- python -m arm_reference_mcp.server
 ```
 
-After adding, all 17 tools are immediately available in your Claude Code session. Ask Claude about ARM registers, instructions, calling conventions, exception levels, page tables, memory barriers, core comparisons, and more -- it will call the tools automatically.
+After adding, all 23 tools are immediately available in your Claude Code session. Ask Claude about ARM registers, instructions, calling conventions, exception levels, NEON intrinsics, SME tiles, optimization patterns, system registers, PMU events, x86-to-ARM porting, and more -- it will call the tools automatically.
 
 **Route 2: Add as a plugin via Claude Code marketplace**
 
@@ -305,10 +328,10 @@ arm-reference-mcp/
   src/
     arm_reference_mcp/
       __init__.py
-      server.py          # MCP server with all 17 tools and inline reference data
+      server.py          # MCP server with all 23 tools and inline reference data
       data.py            # Register definitions for AArch32 and AArch64
   tests/
-    test_tools.py        # 84 test cases covering all 17 tools
+    test_tools.py        # 128 test cases covering all 23 tools
   .claude-plugin/
     plugin.json          # Claude Code plugin metadata
     marketplace.json     # Plugin marketplace manifest
@@ -371,6 +394,12 @@ Beyond registers, the server includes:
 - **ARM core/IP reference** -- Cortex-A/R/M/X and Neoverse series with pipeline details, features, and comparison
 - **12 assembly patterns** -- function prologues, atomics, spinlocks, context switches, syscalls, TLB/cache maintenance, MMU enable, exception vectors (both AArch32 and AArch64)
 - **10 memory barriers** -- DMB, DSB, ISB, LDAR, STLR, LDAPR, CAS variants, SB, CSDB, SSBB/PSSBB with domain options and Spectre mitigation
+- **40+ NEON/ASIMD intrinsics** -- arithmetic (vaddq, vmulq, vfmaq), loads/stores (vld1q, vst1q, vld2q), comparisons, conversions, shuffles, and dot-product intrinsics with latency/throughput data
+- **SME tile operations** -- 10 topics covering ZA storage, outer products (FMOPA/FMOPS), streaming SVE mode, SME2 enhancements, and programming model
+- **12 optimization patterns** -- matrix multiply, memcpy, dot product, sort, hash, string search, reduction, convolution with NEON/SVE/SME techniques and code snippets
+- **50+ system registers** -- TCR, MAIR, HCR, VBAR, CNTP, ID_AA64* and more, filterable by exception level and category
+- **25+ PMU events** -- cache, branch, pipeline, memory, and TLB events with formulas, AI workload tips, and Top-Down methodology guide
+- **30+ intrinsic translations** -- SSE, SSE2, AVX, AVX2, AVX-512 to NEON/SVE mappings with porting tips and gotchas
 
 ---
 
@@ -443,6 +472,30 @@ Beyond registers, the server includes:
 17. **`explain_barrier`** (`DMB`)
 
     Explains Data Memory Barrier: what it does (orders memory accesses), what it doesn't do (not DSB/ISB), when to use it (locks, producer-consumer, MMIO), and all 12 domain options (SY, ST, LD, ISH, ISHST, ISHLD, NSH, OSH, etc.).
+
+18. **`explain_neon_intrinsic`** (`vfmaq_f32`)
+
+    Returns the C signature (`float32x4_t vfmaq_f32(...)`), instruction (`FMLA Vd.4S`), category (Arithmetic), architecture (AArch64), latency (4 cycles), throughput (2/cycle), and a usage example showing dot-product accumulation.
+
+19. **`explain_sme_tile`** (`outer_product`)
+
+    Explains SME outer-product instructions: FMOPA computes the outer product of two SVE vectors and accumulates into a ZA tile. Shows all variants (FP32, BF16, INT8), dual-predicate masking, and a complete GEMM code example.
+
+20. **`suggest_optimization`** (`dot_product`, `cortex-a78`)
+
+    Suggests 3+ ARM-specific optimizations for dot product: NEON FMLA with 2-4x unrolling, UDOT/SDOT for INT8 quantized inference, and SVE predicated loops. Includes core-specific notes for Cortex-A78 (2x SIMD pipes, UDOT support).
+
+21. **`lookup_system_register`** (`TCR_EL1`)
+
+    Returns full name (Translation Control Register), exception level (EL1), access type, encoding, width, category, description, and key fields (T0SZ, T1SZ, TG0, TG1, IPS) with bit positions and descriptions.
+
+22. **`explain_performance_counter`** (`L1D_CACHE_REFILL`)
+
+    Returns event number (0x03), category (Cache), what it measures, when to use it, useful formulas (L1D miss rate, MPKI), Linux perf command, AI/ML workload tips, and bare-metal PMU register setup.
+
+23. **`translate_intrinsic`** (`_mm256_fmadd_ps`, `x86`, `neon`)
+
+    Maps AVX2 FMA to ARM: NEON equivalent (`2x vfmaq_f32`), SVE equivalent (`svmla_f32_x`), data type (8x float32), porting notes, and critical gotcha (operand order reversal between x86 FMA and NEON FMA).
 
 ---
 
@@ -1003,6 +1056,293 @@ CRITICAL: DMB only orders memory accesses relative to each other. It does NOT:
   OSH:    Outer Shareable (full system including GPUs/DMA)
   ... and NSHST, NSHLD, OSHST, OSHLD variants
 ```
+
+---
+
+### 18. explain_neon_intrinsic
+
+**Prompt:** "How do I use the fused multiply-add NEON intrinsic?"
+
+**Response** (via `explain_neon_intrinsic("vfmaq_f32")`):
+
+```
+# NEON Intrinsic: vfmaq_f32
+
+Signature: float32x4_t vfmaq_f32(float32x4_t a, float32x4_t b, float32x4_t c)
+Instruction: FMLA Vd.4S, Vn.4S, Vm.4S
+Category: Arithmetic
+Architecture: AArch64
+
+## Description
+Fused multiply-accumulate: a + b * c. This is the preferred FMA intrinsic
+on AArch64 (ARMv8.0+). Guaranteed to emit a true fused multiply-add with
+a single rounding step. Critical for AI/ML inference kernels.
+
+## Performance
+  Latency: 4 cycles (Cortex-A78 class)
+  Throughput: 2 per cycle
+
+## Example
+  float32x4_t acc = vdupq_n_f32(0.0f);
+  for (int i = 0; i < N; i += 4) {
+      float32x4_t a = vld1q_f32(&src_a[i]);
+      float32x4_t b = vld1q_f32(&src_b[i]);
+      acc = vfmaq_f32(acc, a, b);  // acc += a * b
+  }
+  float32_t result = vaddvq_f32(acc);  // horizontal sum
+```
+
+---
+
+### 19. explain_sme_tile
+
+**Prompt:** "How does the SME outer product instruction work?"
+
+**Response** (via `explain_sme_tile("outer_product")`):
+
+```
+# SME: Outer Product Operations
+
+The core primitive in SME is the outer-product-and-accumulate instruction.
+Given two SVE vectors, it computes their outer product and accumulates
+into a ZA tile.
+
+For FMOPA ZA0.S, P0/M, P1/M, Z0.S, Z1.S:
+  ZA0.S[i][j] += Z0.S[i] * Z1.S[j]
+
+One instruction performs (SVL/32)^2 FP32 MACs -- at SVL=512, that's
+16x16 = 256 FMACs per instruction.
+
+Available variants:
+  FMOPA / FMOPS:  FP32/FP64 outer product add/subtract
+  BFMOPA:         BF16 inputs, FP32 accumulation (2x throughput)
+  SMOPA / UMOPA:  INT8 inputs, INT32 accumulation (4x throughput)
+```
+
+---
+
+### 20. suggest_optimization
+
+**Prompt:** "How should I optimize a dot product on Cortex-A78?"
+
+**Response** (via `suggest_optimization("dot_product", target_core="cortex-a78")`):
+
+```
+# ARM Optimization Guide: Dot Product
+
+## Optimization Techniques
+
+### 1. NEON FMLA accumulation (ARMv8.0+)
+  Load 4 FP32 values from each vector, multiply-accumulate into a NEON
+  accumulator, then reduce with FADDP. Unroll 2-4x to hide FMLA latency.
+
+### 2. UDOT/SDOT integer dot product (ARMv8.2+)
+  For quantized INT8 inference, UDOT/SDOT compute 4-element dot products
+  directly. 4x throughput vs scalar.
+
+### 3. SVE predicated loop
+  Use WHILELT for loop tail handling, FADDA for in-order reduction.
+
+## Core-Specific Notes (Cortex-A78)
+  - ARMv8.2-A: UDOT/SDOT available
+  - 2x 128-bit SIMD pipes: can sustain 2 FMLA/cycle
+```
+
+---
+
+### 21. lookup_system_register
+
+**Prompt:** "What is the TCR_EL1 register?"
+
+**Response** (via `lookup_system_register("TCR_EL1")`):
+
+```
+# System Register: TCR_EL1
+
+Full Name: Translation Control Register
+Exception Level: EL1
+Access: Read/Write
+Width: 64-bit
+Category: Memory Management
+
+## Description
+Controls translation table walks for EL0/EL1. Configures granule size,
+region sizes (T0SZ/T1SZ), cacheability of page-table walks, and
+intermediate physical address size.
+
+## Key Fields
+  [5:0]   T0SZ   Size offset for TTBR0_EL1 region
+  [21:16] T1SZ   Size offset for TTBR1_EL1 region
+  [15:14] TG0    Granule size for TTBR0 (00=4KB, 01=64KB, 10=16KB)
+  [31:30] TG1    Granule size for TTBR1
+  [34:32] IPS    Intermediate Physical Address Size
+```
+
+---
+
+### 22. explain_performance_counter
+
+**Prompt:** "What PMU event should I use to measure cache misses?"
+
+**Response** (via `explain_performance_counter("L1D_CACHE_REFILL")`):
+
+```
+# PMU Event: L1D_CACHE_REFILL (0x03)
+
+Category: Cache
+Linux perf: perf stat -e l1d_cache_refill
+
+## What It Measures
+Counts each cache line refill into the L1 data cache caused by a data
+access that misses in L1D.
+
+## Useful Formulas
+  L1D miss rate = L1D_CACHE_REFILL / L1D_CACHE
+  MPKI = L1D_CACHE_REFILL * 1000 / INST_RETIRED
+
+## AI/ML Workload Tips
+For ML inference, high L1D misses suggest tensor data layout is not
+cache-friendly. Consider tiling or NHWC/NCHW layout changes.
+```
+
+---
+
+### 23. translate_intrinsic
+
+**Prompt:** "What's the ARM equivalent of _mm256_fmadd_ps?"
+
+**Response** (via `translate_intrinsic("_mm256_fmadd_ps", "x86", "neon")`):
+
+```
+# Intrinsic Translation: _mm256_fmadd_ps -> 2x vfmaq_f32
+
+## x86 (FMA/AVX2)
+  Intrinsic: _mm256_fmadd_ps
+  Instruction: VFMADD132PS / VFMADD213PS / VFMADD231PS (ymm)
+
+## ARM NEON Equivalent
+  Intrinsic: 2x vfmaq_f32 (split into high/low)
+  Instruction: FMLA Vd.4S, Vn.4S, Vm.4S (x2)
+
+## ARM SVE Equivalent
+  Intrinsic: svmla_f32_x(pg, acc, a, b)
+  Instruction: FMLA Zd.S, Pg/M, Zn.S, Zm.S
+
+## Gotchas
+Operand order differs! x86 FMA: fmadd(a,b,c) = a*b+c.
+NEON FMA: vfmaq_f32(acc,a,b) = acc+a*b. Accumulator is FIRST in NEON.
+```
+
+---
+
+## Testing
+
+### Running tests
+
+The test suite is self-contained -- it includes its own minimal test runner so you don't need pytest or any other test framework installed. Just run:
+
+```bash
+python tests/test_tools.py
+```
+
+You'll see output like:
+
+```
+  PASS  TestLookupRegister.test_cpsr
+  PASS  TestLookupRegister.test_x0
+  ...
+  PASS  TestTranslateIntrinsic.test_overview
+
+============================================================
+Results: 128/128 passed, 0 failed
+============================================================
+```
+
+If you prefer pytest (and have it installed), that works too:
+
+```bash
+python -m pytest tests/test_tools.py -v
+```
+
+### What the tests cover
+
+Every test calls the tool function directly (no MCP transport needed) and checks that:
+- The output contains expected keywords (`assert_contains`)
+- The output does not start with `"Error"` for valid inputs (`assert_no_error`)
+- Invalid inputs return error messages (not exceptions)
+- Case-insensitive lookups work
+- Overview/list queries return structured output
+
+### Test cases by tool
+
+| # | Tool | Test Cases |
+|---|------|------------|
+| 1 | `lookup_register` | 9 |
+| 2 | `list_registers` | 5 |
+| 3 | `decode_instruction` | 6 |
+| 4 | `explain_condition_code` | 6 |
+| 5 | `explain_calling_convention` | 3 |
+| 6 | `search_registers` | 4 |
+| 7 | `decode_register_value` | 5 |
+| 8 | `explain_exception_levels` | 4 |
+| 9 | `explain_security_model` | 4 |
+| 10 | `lookup_core` | 5 |
+| 11 | `compare_cores` | 3 |
+| 12 | `explain_page_table_format` | 4 |
+| 13 | `explain_memory_attributes` | 6 |
+| 14 | `explain_extension` | 6 |
+| 15 | `compare_architecture_versions` | 3 |
+| 16 | `show_assembly_pattern` | 5 |
+| 17 | `explain_barrier` | 6 |
+| 18 | `explain_neon_intrinsic` | 6 |
+| 19 | `explain_sme_tile` | 8 |
+| 20 | `suggest_optimization` | 6 |
+| 21 | `lookup_system_register` | 8 |
+| 22 | `explain_performance_counter` | 8 |
+| 23 | `translate_intrinsic` | 8 |
+| | **Total** | **128** |
+
+### Adding tests for new tools
+
+Follow the existing pattern in `tests/test_tools.py`:
+
+1. Import your new tool function at the top of the file:
+   ```python
+   from arm_reference_mcp.server import (
+       ...
+       your_new_tool,
+   )
+   ```
+
+2. Add a test class (one class per tool):
+   ```python
+   class TestYourNewTool:
+       def test_basic_lookup(self):
+           r = your_new_tool("some_input")
+           assert_no_error(r)
+           assert_contains(r, "expected", "keywords")
+
+       def test_case_insensitive(self):
+           r = your_new_tool("SOME_INPUT")
+           assert_no_error(r)
+
+       def test_not_found(self):
+           r = your_new_tool("nonexistent")
+           assert "Error" in r
+   ```
+
+3. Register your class in the `run_all()` function's `test_classes` list:
+   ```python
+   test_classes = [
+       ...
+       TestYourNewTool,
+   ]
+   ```
+
+4. Run the tests:
+   ```bash
+   python tests/test_tools.py
+   ```
 
 ---
 

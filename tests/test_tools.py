@@ -28,6 +28,12 @@ from arm_reference_mcp.server import (
     compare_architecture_versions,
     show_assembly_pattern,
     explain_barrier,
+    explain_neon_intrinsic,
+    explain_sme_tile,
+    suggest_optimization,
+    lookup_system_register,
+    explain_performance_counter,
+    translate_intrinsic,
 )
 
 
@@ -511,6 +517,237 @@ class TestExplainBarrier:
         assert "not found" in r.lower() or "error" in r.lower() or "available" in r.lower()
 
 
+# ---- Tool 18: explain_neon_intrinsic ----
+
+class TestExplainNeonIntrinsic:
+    def test_vaddq_f32(self):
+        r = explain_neon_intrinsic("vaddq_f32")
+        assert_no_error(r)
+        assert_contains(r, "FADD", "float32x4_t", "Arithmetic")
+
+    def test_vld1q_f32(self):
+        r = explain_neon_intrinsic("vld1q_f32")
+        assert_no_error(r)
+        assert_contains(r, "Load")
+
+    def test_case_insensitive(self):
+        r = explain_neon_intrinsic("VADDQ_F32")
+        assert_no_error(r)
+
+    def test_overview(self):
+        r = explain_neon_intrinsic("list")
+        assert_no_error(r)
+        assert_contains(r, "Arithmetic", "Load/Store")
+
+    def test_not_found(self):
+        r = explain_neon_intrinsic("nonexistent")
+        assert "Error" in r
+
+    def test_vdotq_s32(self):
+        r = explain_neon_intrinsic("vdotq_s32")
+        assert_no_error(r)
+        assert_contains(r, "dot product")
+
+
+# ---- Tool 19: explain_sme_tile ----
+
+class TestExplainSmeTile:
+    def test_overview(self):
+        r = explain_sme_tile("overview")
+        assert_no_error(r)
+        assert_contains(r, "SME", "ZA", "Scalable Matrix")
+
+    def test_za_storage(self):
+        r = explain_sme_tile("za_storage")
+        assert_no_error(r)
+        assert_contains(r, "ZA", "tile")
+
+    def test_outer_product(self):
+        r = explain_sme_tile("outer_product")
+        assert_no_error(r)
+        assert_contains(r, "FMOPA")
+
+    def test_streaming_mode(self):
+        r = explain_sme_tile("streaming_mode")
+        assert_no_error(r)
+        assert_contains(r, "SMSTART", "SMSTOP")
+
+    def test_case_insensitive(self):
+        r = explain_sme_tile("OVERVIEW")
+        assert_no_error(r)
+
+    def test_not_found(self):
+        r = explain_sme_tile("nonexistent")
+        assert "Error" in r
+
+    def test_sme2(self):
+        r = explain_sme_tile("sme2")
+        assert_no_error(r)
+        assert_contains(r, "SME2")
+
+    def test_programming_model(self):
+        r = explain_sme_tile("programming_model")
+        assert_no_error(r)
+        assert_contains(r, "streaming")
+
+
+# ---- Tool 20: suggest_optimization ----
+
+class TestSuggestOptimization:
+    def test_matrix_multiply(self):
+        r = suggest_optimization("matrix_multiply")
+        assert_no_error(r)
+        assert_contains(r, "NEON", "Optimization")
+
+    def test_memcpy(self):
+        r = suggest_optimization("memcpy")
+        assert_no_error(r)
+        assert_contains(r, "LDP", "STP")
+
+    def test_with_core(self):
+        r = suggest_optimization("dot_product", target_core="cortex-a78")
+        assert_no_error(r)
+        assert_contains(r, "Cortex-A78")
+
+    def test_overview(self):
+        r = suggest_optimization("list")
+        assert_no_error(r)
+        assert_contains(r, "matrix_multiply", "memcpy")
+
+    def test_not_found(self):
+        r = suggest_optimization("nonexistent")
+        assert "Error" in r
+
+    def test_case_insensitive(self):
+        r = suggest_optimization("MATRIX_MULTIPLY")
+        assert_no_error(r)
+
+
+# ---- Tool 21: lookup_system_register ----
+
+class TestLookupSystemRegister:
+    def test_sctlr_el1(self):
+        r = lookup_system_register("SCTLR_EL1")
+        assert_no_error(r)
+        assert_contains(r, "System Control", "MMU")
+
+    def test_case_insensitive(self):
+        r = lookup_system_register("sctlr_el1")
+        assert_no_error(r)
+
+    def test_el_filter(self):
+        r = lookup_system_register("list", el="EL1")
+        assert_no_error(r)
+        assert_contains(r, "SCTLR_EL1", "VBAR_EL1")
+
+    def test_list_all(self):
+        r = lookup_system_register("list")
+        assert_no_error(r)
+        assert_contains(r, "Memory Management")
+
+    def test_not_found(self):
+        r = lookup_system_register("NONEXISTENT_REG")
+        assert "Error" in r or "not found" in r.lower()
+
+    def test_id_registers(self):
+        r = lookup_system_register("id")
+        assert_no_error(r)
+        assert_contains(r, "ID_AA64PFR0_EL1")
+
+    def test_timer(self):
+        r = lookup_system_register("timer")
+        assert_no_error(r)
+        assert_contains(r, "CNTPCT_EL0")
+
+    def test_hcr_el2(self):
+        r = lookup_system_register("HCR_EL2")
+        assert_no_error(r)
+        assert_contains(r, "Hypervisor")
+
+
+# ---- Tool 22: explain_performance_counter ----
+
+class TestExplainPerformanceCounter:
+    def test_l1d_cache_refill(self):
+        r = explain_performance_counter("L1D_CACHE_REFILL")
+        assert_no_error(r)
+        assert_contains(r, "cache", "refill")
+
+    def test_by_hex(self):
+        r = explain_performance_counter("0x03")
+        assert_no_error(r)
+        assert_contains(r, "L1D_CACHE_REFILL")
+
+    def test_case_insensitive(self):
+        r = explain_performance_counter("cpu_cycles")
+        assert_no_error(r)
+
+    def test_overview(self):
+        r = explain_performance_counter("list")
+        assert_no_error(r)
+        assert_contains(r, "Cache")
+
+    def test_not_found(self):
+        r = explain_performance_counter("NONEXISTENT")
+        assert "Error" in r or "not found" in r.lower()
+
+    def test_topdown(self):
+        r = explain_performance_counter("topdown")
+        assert_no_error(r)
+        assert_contains(r, "Frontend", "Backend")
+
+    def test_category_filter(self):
+        r = explain_performance_counter("cache")
+        assert_no_error(r)
+        assert_contains(r, "L1D_CACHE")
+
+    def test_stall_frontend(self):
+        r = explain_performance_counter("STALL_FRONTEND")
+        assert_no_error(r)
+        assert_contains(r, "stall")
+
+
+# ---- Tool 23: translate_intrinsic ----
+
+class TestTranslateIntrinsic:
+    def test_mm_add_ps_to_neon(self):
+        r = translate_intrinsic("_mm_add_ps", "x86", "neon")
+        assert_no_error(r)
+        assert_contains(r, "vaddq_f32")
+
+    def test_mm_add_ps_to_sve(self):
+        r = translate_intrinsic("_mm_add_ps", "x86", "sve")
+        assert_no_error(r)
+        assert_contains(r, "svadd_f32")
+
+    def test_reverse_neon_to_x86(self):
+        r = translate_intrinsic("vaddq_f32", "neon", "x86")
+        assert_no_error(r)
+        assert_contains(r, "ADDPS", "vaddq_f32")
+
+    def test_case_insensitive(self):
+        r = translate_intrinsic("_MM_ADD_PS", "x86", "neon")
+        assert_no_error(r)
+
+    def test_overview(self):
+        r = translate_intrinsic("list", "x86", "neon")
+        assert_no_error(r)
+        assert_contains(r, "SSE")
+
+    def test_not_found(self):
+        r = translate_intrinsic("_mm_nonexistent", "x86", "neon")
+        assert "Error" in r or "not found" in r.lower()
+
+    def test_avx_to_neon(self):
+        r = translate_intrinsic("_mm256_add_ps", "x86", "neon")
+        assert_no_error(r)
+        assert_contains(r, "vaddq_f32")
+
+    def test_invalid_arch(self):
+        r = translate_intrinsic("_mm_add_ps", "x86", "mips")
+        assert "Error" in r
+
+
 # ---- Run all tests ----
 
 def run_all():
@@ -535,6 +772,12 @@ def run_all():
         TestCompareArchitectureVersions,
         TestShowAssemblyPattern,
         TestExplainBarrier,
+        TestExplainNeonIntrinsic,
+        TestExplainSmeTile,
+        TestSuggestOptimization,
+        TestLookupSystemRegister,
+        TestExplainPerformanceCounter,
+        TestTranslateIntrinsic,
     ]
 
     total = 0
@@ -556,7 +799,7 @@ def run_all():
                 failed += 1
                 tb = traceback.format_exc()
                 failures.append(f"  FAIL  {test_id}\n        {e}\n")
-                print(f"  FAIL  {test_id}  —  {e}")
+                print(f"  FAIL  {test_id}  --  {e}")
 
     print(f"\n{'=' * 60}")
     print(f"Results: {passed}/{total} passed, {failed} failed")
