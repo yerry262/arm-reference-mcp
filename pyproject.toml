@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arm-reference-mcp"
+version = "0.1.0"
+description = "MCP server for ARM register reference — AArch32 and AArch64"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+]
+
+[project.scripts]
+arm-reference-mcp = "arm_reference_mcp.server:main"

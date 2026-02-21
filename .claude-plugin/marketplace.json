@@ -1,0 +1,9 @@
+{
+  "plugins": [
+    {
+      "name": "arm-reference-mcp",
+      "description": "ARM register quick-reference — lookup and browse registers for AArch32 and AArch64 architectures.",
+      "source": "."
+    }
+  ]
+}
