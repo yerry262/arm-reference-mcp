@@ -4,7 +4,9 @@
       "mcp__arm-docs-rag__*",
       "mcp__arm-cloud-migration__*",
       "mcp__arm-tinyml__*",
-      "Bash(tail:*)"
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(cd /d/Just4Claude/arm-reference-mcp && python3 << 'EOFPYTHON'\nimport re\n\nfiles_to_analyze = {\n    'src/arm_reference_mcp/server.py': 23,\n    'src/arm_reference_mcp/cloud_migration_server.py': 7,\n    'src/arm_reference_mcp/docs_rag_server.py': 7,\n    'src/arm_reference_mcp/tinyml_server.py': 7,\n}\n\nfor filepath, tool_count in files_to_analyze.items\\(\\):\n    with open\\(filepath, 'r', encoding='utf-8'\\) as f:\n        content = f.read\\(\\)\n    \n    # Count major data structures \\(dicts with capital letter names at module level\\)\n    data_dicts = len\\(re.findall\\(r'^[A-Z_]+\\\\s*=\\\\s*\\\\{', content, re.MULTILINE\\)\\)\n    data_lists = len\\(re.findall\\(r'^[A-Z_]+\\\\s*=\\\\s*\\\\[', content, re.MULTILINE\\)\\)\n    \n    # Count helper functions \\(def _something\\)\n    helpers = len\\(re.findall\\(r'^def _\\\\w+', content, re.MULTILINE\\)\\)\n    \n    # Count total lines of inline data \\(dicts/lists without leading _\\)\n    inline_data_lines = len\\(re.findall\\(r'^\\\\s*\\\\{[^}]*\\\\}|^\\\\s*\\\\[[^\\\\]]*\\\\]', content, re.MULTILINE\\)\\)\n    \n    print\\(f\"\\\\n{filepath}\"\\)\n    print\\(f\"  Tools: {tool_count}\"\\)\n    print\\(f\"  Helper functions \\(_*\\): {helpers}\"\\)\n    print\\(f\"  Module-level dicts: {data_dicts}\"\\)\n    print\\(f\"  Module-level lists: {data_lists}\"\\)\n\nEOFPYTHON)"
     ]
   },
   "enableAllProjectMcpServers": true,
