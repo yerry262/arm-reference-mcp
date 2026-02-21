@@ -1,8 +1,23 @@
 {
   "mcpServers": {
     "arm-reference": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/yerry262/arm-reference-mcp.git", "arm-reference-mcp"],
+      "command": "python",
+      "args": ["-m", "arm_reference_mcp.server"],
+      "type": "stdio"
+    },
+    "arm-docs-rag": {
+      "command": "python",
+      "args": ["-m", "arm_reference_mcp.docs_rag_server"],
+      "type": "stdio"
+    },
+    "arm-cloud-migration": {
+      "command": "python",
+      "args": ["-m", "arm_reference_mcp.cloud_migration_server"],
+      "type": "stdio"
+    },
+    "arm-tinyml": {
+      "command": "python",
+      "args": ["-m", "arm_reference_mcp.tinyml_server"],
       "type": "stdio"
     }
   }

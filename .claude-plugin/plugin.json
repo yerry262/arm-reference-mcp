@@ -1,5 +1,5 @@
 {
   "name": "arm-reference-mcp",
-  "description": "ARM architecture reference -- 23 tools covering registers, instructions, calling conventions, exception levels, security models, page tables, memory attributes, extensions, assembly patterns, barriers, core/IP reference, NEON intrinsics, SME tiles, optimization, system registers, PMU events, and x86-to-ARM translation for AArch32 and AArch64.",
-  "version": "0.2.0"
+  "description": "ARM architecture MCP toolkit — 44 tools across 4 servers: register reference (23 tools), documentation RAG (7 tools), cloud migration advisor (7 tools), and TinyML/edge AI deployment (7 tools) for AArch32 and AArch64.",
+  "version": "0.4.0"
 }

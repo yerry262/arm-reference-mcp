@@ -8,6 +8,21 @@
       "name": "arm-reference-mcp",
       "description": "ARM architecture reference -- 23 tools covering registers, instructions, calling conventions, exception levels, security models, page tables, memory attributes, extensions, assembly patterns, barriers, core/IP reference, NEON intrinsics, SME tiles, optimization, system registers, PMU events, and x86-to-ARM translation for AArch32 and AArch64.",
       "source": "./"
+    },
+    {
+      "name": "arm-docs-rag-mcp",
+      "description": "ARM documentation RAG -- 7 tools for searching curated ARM manual snippets, explaining architecture concepts, locating register documentation, retrieving core errata, comparing features across architecture versions, browsing documentation catalogs, and instruction encoding reference.",
+      "source": "./"
+    },
+    {
+      "name": "arm-cloud-migration-mcp",
+      "description": "ARM cloud migration advisor -- 7 tools for scanning x86 dependencies, recommending ARM cloud instances (AWS Graviton, Azure Cobalt, GCP Axion, Oracle Ampere), checking Docker arm64 support, generating cross-arch CI configs, estimating migration effort, generating multi-arch Dockerfiles, and comparing ARM vs x86 performance.",
+      "source": "./"
+    },
+    {
+      "name": "arm-tinyml-mcp",
+      "description": "ARM TinyML / edge AI deployment -- 7 tools for analyzing model operator compatibility (Ethos-U, CMSIS-NN, ARM NN), recommending quantization strategies, estimating inference performance, generating deployment code, comparing edge targets, suggesting model architectures for hardware constraints, and explaining TinyML frameworks.",
+      "source": "./"
     }
   ]
 }

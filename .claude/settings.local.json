@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__arm-docs-rag__*",
+      "mcp__arm-cloud-migration__*",
+      "mcp__arm-tinyml__*",
+      "Bash(tail:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "arm-reference"
+  ]
+}
